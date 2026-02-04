@@ -1,7 +1,7 @@
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."); io=devnull)
 
-using ESMEmbed
+using ESMFold
 
 seq = "ELLKKLLEELKG"
 expected_path = joinpath(@__DIR__, "output_ELLKKLLEELKG.pdb")
@@ -10,7 +10,7 @@ generated_path = joinpath(@__DIR__, "output_ELLKKLLEELKG.generated.pdb")
 function _load_model()
     weights_path = joinpath(@__DIR__, "..", "weights", "esm.safetensors")
     if isfile(weights_path)
-        reader = ESMEmbed.SafeTensors.Reader(weights_path)
+        reader = ESMFold.SafeTensors.Reader(weights_path)
         (
             num_layers,
             embed_dim,
@@ -22,10 +22,10 @@ function _load_model()
             position_bins,
             num_blocks,
             lddt_head_hid_dim,
-        ) = ESMEmbed._infer_esmfold_full_config(reader)
+        ) = ESMFold._infer_esmfold_full_config(reader)
 
-        alphabet = ESMEmbed.Alphabet_from_architecture("ESM-1b")
-        esm = ESMEmbed.ESM2(
+        alphabet = ESMFold.Alphabet_from_architecture("ESM-1b")
+        esm = ESMFold.ESM2(
             num_layers,
             embed_dim,
             attention_heads;
@@ -33,7 +33,7 @@ function _load_model()
             token_dropout = true,
         )
 
-        trunk_cfg = ESMEmbed.FoldingTrunkConfig(
+        trunk_cfg = ESMFold.FoldingTrunkConfig(
             num_blocks,
             c_s,
             c_z,
@@ -45,21 +45,21 @@ function _load_model()
             false,
             4,
             nothing,
-            ESMEmbed.StructureModuleConfig(),
+            ESMFold.StructureModuleConfig(),
         )
 
-        cfg = ESMEmbed.ESMFoldConfig(; trunk=trunk_cfg, lddt_head_hid_dim=lddt_head_hid_dim, use_esm_attn_map=false)
-        model = ESMEmbed.ESMFold(esm; cfg=cfg)
-        ESMEmbed.load_esmfold_safetensors!(model, reader)
+        cfg = ESMFold.ESMFoldConfig(; trunk=trunk_cfg, lddt_head_hid_dim=lddt_head_hid_dim, use_esm_attn_map=false)
+        model = ESMFold.ESMFold(esm; cfg=cfg)
+        ESMFold.load_esmfold_safetensors!(model, reader)
         return model
     end
 
-    return ESMEmbed.load_ESMFold()
+    return ESMFold.load_ESMFold()
 end
 
 model = _load_model()
-output = ESMEmbed.infer(model, seq)
-pdb = ESMEmbed.output_to_pdb(output)[1]
+output = ESMFold.infer(model, seq)
+pdb = ESMFold.output_to_pdb(output)[1]
 open(generated_path, "w") do io
     write(io, pdb)
 end
@@ -81,7 +81,7 @@ if expected != pdb
     error("PDB does not match expected output.")
 end
 
-metrics = ESMEmbed.confidence_metrics(output)
+metrics = ESMFold.confidence_metrics(output)
 println("PDB matches: ", expected_path)
 println("mean_plddt: ", metrics.mean_plddt)
 println("ptm: ", metrics.ptm)

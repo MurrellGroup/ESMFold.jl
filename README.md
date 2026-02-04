@@ -4,12 +4,10 @@ A Julia port of the **full ESMFold model**: ESM2 embeddings + folding trunk + st
 This repo runs end‑to‑end folding on CPU, and will run on GPU when you move the model/tensors
 to the GPU.
 
-Note: the module name is currently `ESMEmbed` for compatibility.
-
 ## Quickstart (single sequence)
 
 ```julia
-using ESMEmbed
+using ESMFold
 
 # Download weights from Hugging Face and build the full folding model
 model = load_ESMFold()
@@ -25,7 +23,7 @@ println(pdb)
 ## Batch Folding
 
 ```julia
-using ESMEmbed
+using ESMFold
 
 model = load_ESMFold()
 seqs = ["ELLKKLLEELKG", "ACDEFGHIKLMNPQRSTVWY"]

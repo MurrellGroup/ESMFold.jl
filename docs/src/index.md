@@ -1,30 +1,29 @@
 ```@meta
-CurrentModule = ESMEmbed
+CurrentModule = ESMFold
 ```
 
-# ESMEmbed
+# ESMFold
 
-A lightweight Julia port of the ESMFold sequence embedding stack.
+A Julia port of the **full ESMFold model**: ESM2 embeddings + folding trunk + structure module.
 
 ## Quickstart
 
 ```julia
-using ESMEmbed
+using ESMFold
 
-model = load_ESM()
-emb = model("ACDEFGHIK")
+model = load_ESMFold()
+output = infer(model, "ACDEFGHIK")
+pdb = output_to_pdb(output)[1]
 ```
 
 ## Outputs
 
-The embedding output is returned in **C × L × B** order (Julia‑native layout):
+`infer` returns a dictionary with structure + confidence outputs, including:
 
-- `C` = embedding width (`c_s`, typically 384)
-- `L` = sequence length (after padding)
-- `B` = batch size
+- `positions`, `frames`, `angles`, `states`
+- `plddt`, `mean_plddt`, `ptm`, and `predicted_aligned_error`
 
-If you request pair features with `return_pair=true` and `use_esm_attn_map=true`, the
-pair tensor is returned as **C_z × L × L × B**. Otherwise `pair = nothing`.
+Use `output_to_pdb` to export PDBs.
 
 ## Input Modes
 
@@ -32,11 +31,11 @@ pair tensor is returned as **C_z × L × L × B**. Otherwise `pair = nothing`.
 - `Vector{Vector{Int}}` (auto‑padded)
 - `Vector{String}` or a single `String`
 
-See the README for more usage examples.
+See the README for more usage examples and batch folding.
 
 ```@index
 ```
 
 ```@autodocs
-Modules = [ESMEmbed]
+Modules = [ESMFold]
 ```

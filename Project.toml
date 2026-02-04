@@ -1,5 +1,5 @@
-name = "ESMEmbed"
-uuid = "92fcdd77-1b6e-4cb4-a5ce-af12488bb353"
+name = "ESMFold"
+uuid = "992ade7d-a23b-44e1-bfa9-f18d3a6e7567"
 authors = ["Ben Murrell"]
 version = "1.0.0-DEV"
 

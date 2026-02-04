@@ -1,14 +1,14 @@
-using ESMEmbed
+using ESMFold
 using Documenter
 
-DocMeta.setdocmeta!(ESMEmbed, :DocTestSetup, :(using ESMEmbed); recursive=true)
+DocMeta.setdocmeta!(ESMFold, :DocTestSetup, :(using ESMFold); recursive=true)
 
 makedocs(;
-    modules=[ESMEmbed],
+    modules=[ESMFold],
     authors="Ben Murrell",
-    sitename="ESMEmbed.jl",
+    sitename="ESMFold.jl",
     format=Documenter.HTML(;
-        canonical="https://MurrellGroup.github.io/ESMEmbed.jl",
+        canonical="https://MurrellGroup.github.io/ESMFold.jl",
         edit_link="main",
         assets=String[],
     ),
@@ -18,6 +18,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/MurrellGroup/ESMEmbed.jl",
+    repo="github.com/MurrellGroup/ESMFold.jl",
     devbranch="main",
 )

@@ -1,5 +1,5 @@
 using Test
-using ESMEmbed
+using ESMFold
 
 @testset "Alphabet" begin
     alphabet = Alphabet_from_architecture("ESM-1b")
@@ -15,7 +15,7 @@ end
 
 @testset "Padding helper" begin
     seqs = [[0, 1, 2], [3]]
-    aa, mask = ESMEmbed._pad_batch(seqs; pad_value = 0)
+    aa, mask = ESMFold._pad_batch(seqs; pad_value = 0)
     @test size(aa) == (2, 3)
     @test size(mask) == (2, 3)
     @test aa[2, 2] == 0

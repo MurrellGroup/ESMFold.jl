@@ -1,4 +1,4 @@
-module ESMEmbed
+module ESMFold
 
 using LinearAlgebra
 using Statistics

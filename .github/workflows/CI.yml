@@ -61,6 +61,6 @@ jobs:
         shell: julia --project=docs --color=yes {0}
         run: |
           using Documenter: DocMeta, doctest
-          using ESMEmbed
-          DocMeta.setdocmeta!(ESMEmbed, :DocTestSetup, :(using ESMEmbed); recursive=true)
-          doctest(ESMEmbed)
+          using ESMFold
+          DocMeta.setdocmeta!(ESMFold, :DocTestSetup, :(using ESMFold); recursive=true)
+          doctest(ESMFold)
