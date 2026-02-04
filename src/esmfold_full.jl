@@ -164,14 +164,7 @@ function (m::ESMFold)(
     structure[:residue_index] = residx
 
     lddt_logits = m.lddt_head(structure[:states])
-    lddt_head = reshape(
-        lddt_logits,
-        size(structure[:states], 1),
-        size(structure[:states], 2),
-        size(structure[:states], 3),
-        37,
-        m.lddt_bins,
-    )
+    lddt_head = _reshape_last_corder(lddt_logits, 37, m.lddt_bins)
     structure[:lddt_head] = lddt_head
 
     plddt = categorical_lddt(lddt_head[end, :, :, :, :], bins=m.lddt_bins)

@@ -79,6 +79,15 @@ function AngleResnet(c_in::Int, c_hidden::Int, no_blocks::Int, no_angles::Int, e
     return AngleResnet(linear_in, linear_initial, layers, linear_out, Float32(epsilon))
 end
 
+function _reshape_last_corder(x::AbstractArray, d1::Int, d2::Int)
+    n = ndims(x)
+    # Move last dimension to front to mimic C-order view semantics.
+    x_perm = permutedims(x, (n, 1:(n - 1)...))
+    y = reshape(x_perm, d2, d1, size(x_perm)[2:end]...)
+    order = vcat(3:ndims(y), 2, 1)
+    return permutedims(y, order)
+end
+
 function (m::AngleResnet)(s, s_initial)
     s_initial = max.(s_initial, 0f0)
     s_initial = m.linear_initial(s_initial)
@@ -90,7 +99,7 @@ function (m::AngleResnet)(s, s_initial)
     end
     s = max.(s, 0f0)
     s = m.linear_out(s)
-    s = reshape(s, size(s)[1:end-1]..., div(size(s, ndims(s)), 2), 2)
+    s = _reshape_last_corder(s, div(size(s, ndims(s)), 2), 2)
     unnormalized = s
     norm = sqrt.(max.(sum(s .^ 2; dims=ndims(s)), m.eps))
     s = s ./ norm

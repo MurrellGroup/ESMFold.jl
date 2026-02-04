@@ -32,12 +32,14 @@ function rot_matmul(a::AbstractArray, b::AbstractArray)
     c32 = a31 .* b12 .+ a32 .* b22 .+ a33 .* b32
     c33 = a31 .* b13 .+ a32 .* b23 .+ a33 .* b33
 
-    return cat(
+    mat = cat(
         cat(c11, c12, c13; dims=ndims(c11)+1),
         cat(c21, c22, c23; dims=ndims(c11)+1),
         cat(c31, c32, c33; dims=ndims(c11)+1);
         dims=ndims(c11)+2,
     )
+    # Ensure last two dims are (row, col)
+    return permutedims(mat, (1:ndims(mat)-2..., ndims(mat), ndims(mat)-1))
 end
 
 function rot_vec_mul(r::AbstractArray, t::AbstractArray)
@@ -91,12 +93,14 @@ function quat_to_rot(quat::AbstractArray)
     r32 = 2 .* (yz .+ wx)
     r33 = 1 .- 2 .* (xx .+ yy)
 
-    return cat(
+    rot = cat(
         cat(r11, r12, r13; dims=ndims(r11)+1),
         cat(r21, r22, r23; dims=ndims(r11)+1),
         cat(r31, r32, r33; dims=ndims(r11)+1);
         dims=ndims(r11)+2,
     )
+    # Ensure last two dims are (row, col)
+    return permutedims(rot, (1:ndims(rot)-2..., ndims(rot), ndims(rot)-1))
 end
 
 function rot_to_quat(rot::AbstractArray)
