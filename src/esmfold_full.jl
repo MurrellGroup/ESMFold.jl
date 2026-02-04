@@ -253,6 +253,17 @@ function infer_pdb(m::ESMFold, seq::AbstractString; kwargs...)
     return infer_pdbs(m, [seq]; kwargs...)[1]
 end
 
+function confidence_metrics(output::AbstractDict)
+    return (
+        plddt = output[:plddt],
+        mean_plddt = output[:mean_plddt],
+        ptm = output[:ptm],
+        predicted_aligned_error = output[:predicted_aligned_error],
+        aligned_confidence_probs = output[:aligned_confidence_probs],
+        max_predicted_aligned_error = output[:max_predicted_aligned_error],
+    )
+end
+
 function set_chunk_size!(m::ESMFold, chunk_size::Union{Nothing,Int})
     set_chunk_size!(m.trunk, chunk_size)
     return m

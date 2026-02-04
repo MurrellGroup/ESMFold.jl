@@ -1,65 +1,72 @@
-# ESMEmbed
+# ESMFold.jl
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://MurrellGroup.github.io/ESMEmbed.jl/stable/)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://MurrellGroup.github.io/ESMEmbed.jl/dev/)
-[![Build Status](https://github.com/MurrellGroup/ESMEmbed.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/MurrellGroup/ESMEmbed.jl/actions/workflows/CI.yml?query=branch%3Amain)
+A Julia port of the **full ESMFold model**: ESM2 embeddings + folding trunk + structure module.
+This repo runs end‑to‑end folding on CPU, and will run on GPU when you move the model/tensors
+to the GPU.
 
-A lightweight Julia port of the **ESMFold sequence embedding stack**. This package lets you load
-ESMFold weights (from Hugging Face) and compute **per‑residue embeddings** on CPU.
-It does **not** include the ESMFold structure module.
+Note: the module name is currently `ESMEmbed` for compatibility.
 
-## Quickstart
+## Quickstart (single sequence)
 
 ```julia
 using ESMEmbed
 
-# Download weights from Hugging Face and build the model
-model = load_ESM()
+# Download weights from Hugging Face and build the full folding model
+model = load_ESMFold()
 
-# Single sequence
-emb = model("ACDEFGHIK")
+seq = "ELLKKLLEELKG"
+output = infer(model, seq)
 
-# Batch of sequences (auto‑padding + mask)
-emb_batch = model(["ACDEFGHIK", "MKT"])
+# PDB output
+pdb = output_to_pdb(output)[1]
+println(pdb)
 ```
 
-## What The Outputs Are
-
-The main call returns **per‑residue sequence embeddings** (the inputs to the structure module in ESMFold).
-For Julia‑native layout, tensors are returned in **C × L × B** order:
-
-- `emb` has shape `(c_s, L, B)`
-  - `c_s`: embedding width (from the checkpoint; typically 384)
-  - `L`: sequence length (after padding)
-  - `B`: batch size
-
-If you want both sequence and pair features:
+## Batch Folding
 
 ```julia
-out = model(["ACDEFGHIK"]; return_pair=true)
-seq = out.sequence   # (c_s, L, B)
-pair = out.pair      # (c_z, L, L, B)
+using ESMEmbed
+
+model = load_ESMFold()
+seqs = ["ELLKKLLEELKG", "ACDEFGHIKLMNPQRSTVWY"]
+
+output = infer(model, seqs)
+
+# PDBs for each sequence
+pdbs = output_to_pdb(output)
 ```
 
-`pair` is only produced when `use_esm_attn_map=true` (see below). Otherwise it is `nothing`.
-
-## Input Conveniences
-
-You can pass any of the following:
-
-- `AbstractMatrix{Int}` shaped `(B, L)`
-- `Vector{Vector{Int}}` (auto‑padded, mask auto‑generated)
-- `Vector{String}` or a single `String`
-
-Indices are **AF2 restype indices** (0‑based). Use:
+You can also go directly to PDBs:
 
 ```julia
-seq_ints = sequence_to_af2_indices("ACDEFGHIK")
+pdbs = infer_pdbs(model, seqs)
+```
+
+## Confidence Metrics
+
+`infer` returns a dictionary with confidence outputs. You can access these directly or use
+`confidence_metrics`:
+
+```julia
+metrics = confidence_metrics(output)
+
+# Per‑residue plDDT (0‑100)
+plddt = metrics.plddt
+
+# Mean plDDT per sequence
+mean_plddt = metrics.mean_plddt
+
+# Predicted TM‑score per sequence
+ptm = metrics.ptm
+
+# Predicted aligned error (PAE)
+pae = metrics.predicted_aligned_error
+max_pae = metrics.max_predicted_aligned_error
 ```
 
 ## Weights And Caching
 
-`load_ESM()` downloads the safetensors checkpoint from Hugging Face using
+`load_ESMFold()` downloads the safetensors checkpoint from Hugging Face using
 `HuggingFaceApi.hf_hub_download`. By default it pulls:
 
 - `repo_id = "facebook/esmfold_v1"`
@@ -70,9 +77,9 @@ Downloaded files are cached by HuggingFaceApi in your Julia depot (via OhMyArtif
 You can override the source if you want to point at a PR or a specific commit:
 
 ```julia
-model = load_ESM(
+model = load_ESMFold(
     repo_id = "facebook/esmfold_v1",
-    filename = "esm.safetensors",
+    filename = "model.safetensors",
     revision = "refs/pr/123",
 )
 ```
@@ -80,39 +87,25 @@ model = load_ESM(
 You can also skip network access and use the local cache only:
 
 ```julia
-model = load_ESM(local_files_only=true)
+model = load_ESMFold(local_files_only=true)
 ```
 
-## Advanced Usage
+## Testing
 
-### Pre‑padded batch with mask
+The regression test script in `scripts/test.jl` folds `"ELLKKLLEELKG"` and compares the
+resulting PDB against `scripts/output_ELLKKLLEELKG.pdb`:
 
-```julia
-aa = [
-    0 1 2 3 4 5;
-    0 1 2 0 0 0;
-]
-mask = [
-    1 1 1 1 1 1;
-    1 1 1 0 0 0;
-]
-emb = model(aa; mask=mask)
-```
-
-### Pair Features
-
-```julia
-model = load_ESM(use_esm_attn_map=true)
-out = model(["ACDEFGHIK"]; return_pair=true)
+```bash
+julia --project=. scripts/test.jl
 ```
 
 ## Notes
 
 - CPU‑only execution is supported.
-- The implementation follows the ESM2 and ESMFold embedding pathway closely, with parity
-  against the original Python model to small floating‑point tolerances.
+- The implementation follows the ESMFold Python model closely and is parity‑checked
+  against the official model within floating‑point tolerances.
 
 ## License
 
-This package reuses ESM code concepts and weight formats. Please refer to the original
-ESM/ESMFold licenses and terms for model usage.
+This package reuses ESM/ESMFold code concepts and weight formats. Please refer to the
+original ESM/ESMFold licenses and terms for model usage.

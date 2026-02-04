@@ -25,6 +25,7 @@ export load_esmfold_npz!, load_esm2_npz!, load_esmfold_safetensors!
 export load_ESM, load_ESMFold
 export sequence_to_af2_indices
 export infer, infer_pdb, infer_pdbs, output_to_pdb
+export confidence_metrics
 export set_training!, is_training
 
 include("alphabet.jl")

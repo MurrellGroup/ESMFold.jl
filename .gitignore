@@ -9,3 +9,9 @@
 *.npz
 *.meta.json
 .DS_Store
+/output_*.pdb
+/scripts/__pycache__/
+__pycache__/
+*.pyc
+/third_party/
+/scripts/*.generated.pdb
