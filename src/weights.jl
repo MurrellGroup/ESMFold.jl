@@ -225,7 +225,7 @@ function _load_structure_module!(reader::SafeTensors.Reader, prefix::String, sm:
     end
 end
 
-function load_esmfold_safetensors!(model::ESMFold, reader::SafeTensors.Reader)
+function load_esmfold_safetensors!(model::ESMFoldModel, reader::SafeTensors.Reader)
     load_esmfold_safetensors!(model.embed, reader)
 
     _load_embedding_weight!(reader, "trunk.pairwise_positional_embedding.embedding.weight", model.trunk.pairwise_positional_embedding.embedding)
@@ -276,7 +276,7 @@ function load_esmfold_safetensors!(model::ESMFold, reader::SafeTensors.Reader)
     return model
 end
 
-function load_esmfold_safetensors!(model::ESMFold, path::AbstractString)
+function load_esmfold_safetensors!(model::ESMFoldModel, path::AbstractString)
     reader = SafeTensors.Reader(path)
     return load_esmfold_safetensors!(model, reader)
 end
@@ -458,7 +458,7 @@ function load_ESMFold(;
     )
     cfg = ESMFoldConfig(; trunk=trunk_cfg, lddt_head_hid_dim=lddt_head_hid_dim, use_esm_attn_map=use_esm_attn_map)
 
-    model = ESMFold(esm; cfg=cfg)
+    model = ESMFoldModel(esm; cfg=cfg)
     load_esmfold_safetensors!(model, reader)
     return model
 end

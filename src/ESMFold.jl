@@ -20,7 +20,7 @@ export ESM2Config, ESM2
 export ESMFoldEmbedConfig, ESMFoldEmbed
 export FoldingTrunkConfig, FoldingTrunk
 export StructureModuleConfig
-export ESMFoldConfig, ESMFold
+export ESMFoldConfig, ESMFoldModel
 export load_esmfold_npz!, load_esm2_npz!, load_esmfold_safetensors!
 export load_ESM, load_ESMFold
 export sequence_to_af2_indices

@@ -35,7 +35,7 @@ function (m::ESMFoldLDDTHead)(x)
     return x
 end
 
-@concrete struct ESMFold <: Onion.Layer
+@concrete struct ESMFoldModel <: Onion.Layer
     cfg::ESMFoldConfig
     embed::ESMFoldEmbed
     trunk::FoldingTrunk
@@ -47,9 +47,9 @@ end
     lddt_head
 end
 
-@layer ESMFold
+@layer ESMFoldModel
 
-function ESMFold(
+function ESMFoldModel(
     esm::ESM2;
     cfg::ESMFoldConfig=ESMFoldConfig(),
 )
@@ -71,7 +71,7 @@ function ESMFold(
     lddt_bins = 50
     lddt_head = ESMFoldLDDTHead(cfg.trunk.structure_module.c_s, cfg.lddt_head_hid_dim, 37 * lddt_bins)
 
-    return ESMFold(
+    return ESMFoldModel(
         cfg,
         embed,
         trunk,
@@ -92,7 +92,7 @@ function _default_residx(aa::AbstractArray)
     return to_device(residx, aa, eltype(residx))
 end
 
-function (m::ESMFold)(
+function (m::ESMFoldModel)(
     aa::AbstractArray{Int,2};
     mask = nothing,
     residx = nothing,
@@ -190,7 +190,7 @@ function (m::ESMFold)(
 end
 
 function infer(
-    m::ESMFold,
+    m::ESMFoldModel,
     sequences::Union{AbstractString,AbstractVector{<:AbstractString}};
     residx = nothing,
     masking_pattern = nothing,
@@ -240,16 +240,16 @@ function infer(
     return output
 end
 
-function output_to_pdb(m::ESMFold, output::AbstractDict)
+function output_to_pdb(m::ESMFoldModel, output::AbstractDict)
     return output_to_pdb(output)
 end
 
-function infer_pdbs(m::ESMFold, seqs::AbstractVector{<:AbstractString}; kwargs...)
+function infer_pdbs(m::ESMFoldModel, seqs::AbstractVector{<:AbstractString}; kwargs...)
     output = infer(m, seqs; kwargs...)
     return output_to_pdb(output)
 end
 
-function infer_pdb(m::ESMFold, seq::AbstractString; kwargs...)
+function infer_pdb(m::ESMFoldModel, seq::AbstractString; kwargs...)
     return infer_pdbs(m, [seq]; kwargs...)[1]
 end
 
@@ -264,11 +264,11 @@ function confidence_metrics(output::AbstractDict)
     )
 end
 
-function set_chunk_size!(m::ESMFold, chunk_size::Union{Nothing,Int})
+function set_chunk_size!(m::ESMFoldModel, chunk_size::Union{Nothing,Int})
     set_chunk_size!(m.trunk, chunk_size)
     return m
 end
 
-function device_ref(m::ESMFold)
+function device_ref(m::ESMFoldModel)
     return m.embed.esm.embed_tokens.weight
 end

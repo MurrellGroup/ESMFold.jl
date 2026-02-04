@@ -49,7 +49,7 @@ function _load_model()
         )
 
         cfg = ESMFold.ESMFoldConfig(; trunk=trunk_cfg, lddt_head_hid_dim=lddt_head_hid_dim, use_esm_attn_map=false)
-        model = ESMFold.ESMFold(esm; cfg=cfg)
+        model = ESMFold.ESMFoldModel(esm; cfg=cfg)
         ESMFold.load_esmfold_safetensors!(model, reader)
         return model
     end
