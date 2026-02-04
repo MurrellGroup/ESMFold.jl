@@ -141,6 +141,146 @@ function load_esmfold_safetensors!(model::ESMFoldEmbed, path::AbstractString)
     return load_esmfold_safetensors!(model, reader)
 end
 
+function _load_layernorm_last!(reader::SafeTensors.Reader, prefix::String, ln::LayerNormLast)
+    SafeTensors.read_into!(reader, "$prefix.weight", ln.w)
+    SafeTensors.read_into!(reader, "$prefix.bias", ln.b)
+end
+
+function _load_linear_last!(reader::SafeTensors.Reader, prefix::String, lin::LinearLast)
+    SafeTensors.read_into!(reader, "$prefix.weight", lin.weight)
+    if lin.use_bias
+        SafeTensors.read_into!(reader, "$prefix.bias", lin.bias)
+    end
+end
+
+function _load_embedding_weight!(reader::SafeTensors.Reader, name::String, emb)
+    permutedims!(emb.weight, SafeTensors.read_tensor(reader, name), (2, 1))
+end
+
+function _load_residue_mlp!(reader::SafeTensors.Reader, prefix::String, mlp::ResidueMLP)
+    _load_layernorm_last!(reader, "$prefix.mlp.0", mlp.norm)
+    _load_linear_last!(reader, "$prefix.mlp.1", mlp.fc1)
+    _load_linear_last!(reader, "$prefix.mlp.3", mlp.fc2)
+end
+
+function _load_triangle_mul!(reader::SafeTensors.Reader, prefix::String, mul::TriangleMultiplicativeUpdate)
+    _load_layernorm_last!(reader, "$prefix.layer_norm_in", mul.layer_norm_in)
+    _load_layernorm_last!(reader, "$prefix.layer_norm_out", mul.layer_norm_out)
+    _load_linear_last!(reader, "$prefix.linear_a_p", mul.linear_a_p)
+    _load_linear_last!(reader, "$prefix.linear_a_g", mul.linear_a_g)
+    _load_linear_last!(reader, "$prefix.linear_b_p", mul.linear_b_p)
+    _load_linear_last!(reader, "$prefix.linear_b_g", mul.linear_b_g)
+    _load_linear_last!(reader, "$prefix.linear_g", mul.linear_g)
+    _load_linear_last!(reader, "$prefix.linear_z", mul.linear_z)
+end
+
+function _load_of_mha!(reader::SafeTensors.Reader, prefix::String, mha::OFMultiheadAttention)
+    _load_linear_last!(reader, "$prefix.linear_q", mha.linear_q)
+    _load_linear_last!(reader, "$prefix.linear_k", mha.linear_k)
+    _load_linear_last!(reader, "$prefix.linear_v", mha.linear_v)
+    _load_linear_last!(reader, "$prefix.linear_o", mha.linear_o)
+    mha.linear_g !== nothing && _load_linear_last!(reader, "$prefix.linear_g", mha.linear_g)
+end
+
+function _load_triangle_attention!(reader::SafeTensors.Reader, prefix::String, attn::TriangleAttention)
+    _load_layernorm_last!(reader, "$prefix.layer_norm", attn.layer_norm)
+    _load_linear_last!(reader, "$prefix.linear", attn.linear)
+    _load_of_mha!(reader, "$prefix.mha", attn.mha)
+end
+
+function _load_structure_module!(reader::SafeTensors.Reader, prefix::String, sm::StructureModule)
+    _load_layernorm_last!(reader, "$prefix.layer_norm_s", sm.layer_norm_s)
+    _load_layernorm_last!(reader, "$prefix.layer_norm_z", sm.layer_norm_z)
+    _load_linear_last!(reader, "$prefix.linear_in", sm.linear_in)
+
+    ipa = sm.ipa
+    _load_linear_last!(reader, "$prefix.ipa.linear_q", ipa.linear_q)
+    _load_linear_last!(reader, "$prefix.ipa.linear_q_points", ipa.linear_q_points.linear)
+    _load_linear_last!(reader, "$prefix.ipa.linear_kv", ipa.linear_kv)
+    _load_linear_last!(reader, "$prefix.ipa.linear_kv_points", ipa.linear_kv_points.linear)
+    _load_linear_last!(reader, "$prefix.ipa.linear_b", ipa.linear_b)
+    _load_linear_last!(reader, "$prefix.ipa.linear_out", ipa.linear_out)
+    SafeTensors.read_into!(reader, "$prefix.ipa.head_weights", ipa.head_weights)
+
+    _load_layernorm_last!(reader, "$prefix.layer_norm_ipa", sm.layer_norm_ipa)
+
+    _load_layernorm_last!(reader, "$prefix.transition.layer_norm", sm.transition.layer_norm)
+    for (i, layer) in enumerate(sm.transition.layers)
+        lp = "$prefix.transition.layers.$(i - 1)"
+        _load_linear_last!(reader, "$lp.linear_1", layer.linear_1)
+        _load_linear_last!(reader, "$lp.linear_2", layer.linear_2)
+        _load_linear_last!(reader, "$lp.linear_3", layer.linear_3)
+    end
+
+    _load_linear_last!(reader, "$prefix.bb_update.linear", sm.bb_update.linear)
+
+    ar = sm.angle_resnet
+    _load_linear_last!(reader, "$prefix.angle_resnet.linear_in", ar.linear_in)
+    _load_linear_last!(reader, "$prefix.angle_resnet.linear_initial", ar.linear_initial)
+    _load_linear_last!(reader, "$prefix.angle_resnet.linear_out", ar.linear_out)
+    for (i, layer) in enumerate(ar.layers)
+        lp = "$prefix.angle_resnet.layers.$(i - 1)"
+        _load_linear_last!(reader, "$lp.linear_1", layer.linear_1)
+        _load_linear_last!(reader, "$lp.linear_2", layer.linear_2)
+    end
+end
+
+function load_esmfold_safetensors!(model::ESMFold, reader::SafeTensors.Reader)
+    load_esmfold_safetensors!(model.embed, reader)
+
+    _load_embedding_weight!(reader, "trunk.pairwise_positional_embedding.embedding.weight", model.trunk.pairwise_positional_embedding.embedding)
+
+    _load_layernorm_last!(reader, "trunk.recycle_s_norm", model.trunk.recycle_s_norm)
+    _load_layernorm_last!(reader, "trunk.recycle_z_norm", model.trunk.recycle_z_norm)
+    permutedims!(model.trunk.recycle_disto.weight, SafeTensors.read_tensor(reader, "trunk.recycle_disto.weight"), (2, 1))
+
+    _load_linear_last!(reader, "trunk.trunk2sm_s", model.trunk.trunk2sm_s)
+    _load_linear_last!(reader, "trunk.trunk2sm_z", model.trunk.trunk2sm_z)
+
+    for (i, block) in enumerate(model.trunk.blocks)
+        prefix = "trunk.blocks.$(i - 1)"
+        _load_layernorm_last!(reader, "$prefix.layernorm_1", block.layernorm_1)
+
+        _load_layernorm_last!(reader, "$prefix.sequence_to_pair.layernorm", block.sequence_to_pair.layernorm)
+        _load_linear_last!(reader, "$prefix.sequence_to_pair.proj", block.sequence_to_pair.proj)
+        _load_linear_last!(reader, "$prefix.sequence_to_pair.o_proj", block.sequence_to_pair.o_proj)
+
+        _load_layernorm_last!(reader, "$prefix.pair_to_sequence.layernorm", block.pair_to_sequence.layernorm)
+        _load_linear_last!(reader, "$prefix.pair_to_sequence.linear", block.pair_to_sequence.linear)
+
+        _load_linear_last!(reader, "$prefix.seq_attention.proj", block.seq_attention.proj)
+        _load_linear_last!(reader, "$prefix.seq_attention.o_proj", block.seq_attention.o_proj)
+        block.seq_attention.g_proj !== nothing && _load_linear_last!(reader, "$prefix.seq_attention.g_proj", block.seq_attention.g_proj)
+
+        _load_triangle_mul!(reader, "$prefix.tri_mul_out", block.tri_mul_out.inner)
+        _load_triangle_mul!(reader, "$prefix.tri_mul_in", block.tri_mul_in.inner)
+
+        _load_triangle_attention!(reader, "$prefix.tri_att_start", block.tri_att_start)
+        _load_triangle_attention!(reader, "$prefix.tri_att_end", block.tri_att_end)
+
+        _load_residue_mlp!(reader, "$prefix.mlp_seq", block.mlp_seq)
+        _load_residue_mlp!(reader, "$prefix.mlp_pair", block.mlp_pair)
+    end
+
+    _load_structure_module!(reader, "trunk.structure_module", model.trunk.structure_module)
+
+    _load_linear_last!(reader, "distogram_head", model.distogram_head)
+    _load_linear_last!(reader, "ptm_head", model.ptm_head)
+    _load_linear_last!(reader, "lm_head", model.lm_head)
+
+    _load_layernorm_last!(reader, "lddt_head.0", model.lddt_head.norm)
+    _load_linear_last!(reader, "lddt_head.1", model.lddt_head.linear_1)
+    _load_linear_last!(reader, "lddt_head.2", model.lddt_head.linear_2)
+    _load_linear_last!(reader, "lddt_head.3", model.lddt_head.linear_3)
+
+    return model
+end
+
+function load_esmfold_safetensors!(model::ESMFold, path::AbstractString)
+    reader = SafeTensors.Reader(path)
+    return load_esmfold_safetensors!(model, reader)
+end
+
 function _infer_esmfold_config(reader::SafeTensors.Reader)
     header_keys = collect(keys(reader.header))
 
@@ -172,6 +312,52 @@ function _infer_esmfold_config(reader::SafeTensors.Reader)
     end
 
     return num_layers, embed_dim, attention_heads, c_s, c_z
+end
+
+function _infer_esmfold_full_config(reader::SafeTensors.Reader)
+    num_layers, embed_dim, attention_heads, c_s, c_z = _infer_esmfold_config(reader)
+
+    block_ids = Int[]
+    for key in keys(reader.header)
+        startswith(key, "trunk.blocks.") || continue
+        parts = split(key, '.')
+        length(parts) < 3 && continue
+        idx = tryparse(Int, parts[3])
+        idx === nothing || push!(block_ids, idx)
+    end
+    num_blocks = isempty(block_ids) ? 0 : maximum(block_ids) + 1
+
+    ln_entry = reader.header["trunk.blocks.0.layernorm_1.weight"]
+    sequence_state_dim = ln_entry.shape[1]
+    z_entry = reader.header["trunk.blocks.0.tri_att_start.layer_norm.weight"]
+    pairwise_state_dim = z_entry.shape[1]
+
+    seq_heads_entry = reader.header["trunk.blocks.0.pair_to_sequence.linear.weight"]
+    sequence_num_heads = seq_heads_entry.shape[1]
+    sequence_head_width = sequence_state_dim ÷ sequence_num_heads
+
+    pair_heads_entry = reader.header["trunk.blocks.0.tri_att_start.linear.weight"]
+    pairwise_num_heads = pair_heads_entry.shape[1]
+    pairwise_head_width = pairwise_state_dim ÷ pairwise_num_heads
+
+    pos_entry = reader.header["trunk.pairwise_positional_embedding.embedding.weight"]
+    position_bins = (pos_entry.shape[1] - 2) ÷ 2
+
+    lddt_entry = reader.header["lddt_head.1.weight"]
+    lddt_head_hid_dim = lddt_entry.shape[1]
+
+    return (
+        num_layers,
+        embed_dim,
+        attention_heads,
+        sequence_state_dim,
+        pairwise_state_dim,
+        sequence_head_width,
+        pairwise_head_width,
+        position_bins,
+        num_blocks,
+        lddt_head_hid_dim,
+    )
 end
 
 function load_ESM(;
@@ -210,6 +396,69 @@ function load_ESM(;
         c_z = c_z,
         use_esm_attn_map = use_esm_attn_map,
     )
+    load_esmfold_safetensors!(model, reader)
+    return model
+end
+
+function load_ESMFold(;
+    repo_id::AbstractString = "facebook/esmfold_v1",
+    filename::AbstractString = "model.safetensors",
+    revision::AbstractString = "ba837a3",
+    cache::Bool = true,
+    local_files_only::Bool = false,
+    use_esm_attn_map::Bool = false,
+)
+    path = hf_hub_download(
+        repo_id,
+        filename;
+        revision = revision,
+        cache = cache,
+        local_files_only = local_files_only,
+    )
+
+    reader = SafeTensors.Reader(path)
+    (
+        num_layers,
+        embed_dim,
+        attention_heads,
+        c_s,
+        c_z,
+        sequence_head_width,
+        pairwise_head_width,
+        position_bins,
+        num_blocks,
+        lddt_head_hid_dim,
+    ) = _infer_esmfold_full_config(reader)
+
+    use_esm_attn_map && !haskey(reader.header, "esm_z_mlp.1.weight") &&
+        error("use_esm_attn_map=true but esm_z_mlp weights are not present in the checkpoint.")
+
+    alphabet = Alphabet_from_architecture("ESM-1b")
+    esm = ESM2(
+        num_layers,
+        embed_dim,
+        attention_heads;
+        alphabet = alphabet,
+        token_dropout = true,
+    )
+
+    trunk_cfg = FoldingTrunkConfig(
+        num_blocks,
+        c_s,
+        c_z,
+        sequence_head_width,
+        pairwise_head_width,
+        position_bins,
+        0f0,
+        0f0,
+        false,
+        4,
+        nothing,
+        StructureModuleConfig(),
+    )
+    cfg = ESMFoldConfig(; trunk=trunk_cfg, lddt_head_hid_dim=lddt_head_hid_dim, use_esm_attn_map=use_esm_attn_map)
+
+    model = ESMFold(esm; cfg=cfg)
     load_esmfold_safetensors!(model, reader)
     return model
 end

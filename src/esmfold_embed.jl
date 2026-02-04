@@ -32,8 +32,8 @@ end
     esm_dict::Alphabet
     esm_feats::Int
     esm_attns::Int
-    af2_to_esm::Vector{Int}
-    esm_s_combine::Vector{Float32}
+    af2_to_esm::AbstractVector{Int}
+    esm_s_combine::AbstractVector{Float32}
     esm_s_mlp::LayerNormMLP
     esm_z_mlp::Union{LayerNormMLP,Nothing}
     n_tokens_embed::Int
@@ -95,6 +95,7 @@ function ESMFoldEmbed(
 end
 
 function _af2_idx_to_esm_idx(m::ESMFoldEmbed, aa::AbstractArray{Int,2}, mask)
+    af2_to_esm = typeof(aa) == typeof(m.af2_to_esm) ? m.af2_to_esm : to_device(m.af2_to_esm, aa, Int)
     aa_shift = aa .+ 1
     aa_masked = if mask === nothing
         aa_shift
@@ -105,7 +106,7 @@ function _af2_idx_to_esm_idx(m::ESMFoldEmbed, aa::AbstractArray{Int,2}, mask)
             ifelse.(mask .== 1, aa_shift, 0)
         end
     end
-    return m.af2_to_esm[aa_masked .+ 1]
+    return af2_to_esm[aa_masked .+ 1]
 end
 
 function _mask_inputs_to_esm(m::ESMFoldEmbed, esmaa, pattern)
@@ -145,8 +146,8 @@ function _compute_language_model_representations(
     eosi = m.esm_dict.eos_idx
     pad = m.esm_dict.padding_idx
 
-    bos = fill(bosi, batch_size, 1)
-    eos = fill(pad, batch_size, 1)
+    bos = to_device(fill(bosi, batch_size, 1), esmaa, eltype(esmaa))
+    eos = to_device(fill(pad, batch_size, 1), esmaa, eltype(esmaa))
     esmaa2 = hcat(bos, esmaa, eos)
 
     lengths = sum(esmaa2 .!= pad, dims=2)
@@ -162,9 +163,10 @@ function _compute_language_model_representations(
     )
 
     num_layers = m.esm.num_layers + 1
-    reps = Array{Float32}(undef, batch_size, size(esmaa2, 2), num_layers, m.esm.embed_dim)
+    first_rep = res.representations[0]
+    reps = zeros_like(first_rep, Float32, batch_size, size(esmaa2, 2), num_layers, m.esm.embed_dim)
     for layer in 0:m.esm.num_layers
-        reps[:, :, layer + 1, :] = Float32.(res.representations[layer])
+        reps[:, :, layer + 1, :] .= Float32.(res.representations[layer])
     end
     # remove bos/eos
     reps = reps[:, 2:(end - 1), :, :]
@@ -196,7 +198,8 @@ function (m::ESMFoldEmbed)(
         need_attn = return_pair && m.cfg.use_esm_attn_map,
     )
 
-    weights = NNlib.softmax(m.esm_s_combine)
+    weights = to_device(m.esm_s_combine, esm_s, eltype(esm_s))
+    weights = NNlib.softmax(weights)
     weights_view = reshape(weights, 1, 1, length(weights), 1)
     esm_s_weighted = sum(esm_s .* weights_view, dims=3)
     esm_s_weighted = dropdims(esm_s_weighted, dims=3)
