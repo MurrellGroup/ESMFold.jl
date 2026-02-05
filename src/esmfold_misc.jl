@@ -16,108 +16,14 @@ end
 @layer ESMFoldAttention
 
 function ESMFoldAttention(embed_dim::Int, num_heads::Int, head_width::Int; gated::Bool=false)
-    proj = LinearLast(embed_dim, embed_dim * 3; bias=false)
-    o_proj = LinearLast(embed_dim, embed_dim; bias=true)
-    g_proj = gated ? LinearLast(embed_dim, embed_dim; bias=true) : nothing
+    proj = LinearFirst(embed_dim, embed_dim * 3; bias=false)
+    o_proj = LinearFirst(embed_dim, embed_dim; bias=true)
+    g_proj = gated ? LinearFirst(embed_dim, embed_dim; bias=true) : nothing
     rescale_factor = Float32(head_width)^-0.5f0
     return ESMFoldAttention(proj, o_proj, g_proj, num_heads, head_width, gated, rescale_factor)
 end
 
 function (m::ESMFoldAttention)(x::AbstractArray; mask=nothing, bias=nothing)
-    # x: (..., L, C)
-    t = m.proj(x)
-    # Split last dim in head-major order like PyTorch (per-head qkv).
-    # After reshape: (..., L, head_width, 3, num_heads)
-    t = reshape(t, size(t)[1:end-1]..., m.head_width, 3, m.num_heads)
-    # Permute to (..., L, num_heads, 3, head_width)
-    b = ndims(x) - 2
-    perm = vcat(collect(1:(b + 1)), b + 4, b + 3, b + 2)
-    t = permutedims(t, perm)
-    q = view(t, ntuple(_ -> :, ndims(t) - 2)..., 1, :)
-    k = view(t, ntuple(_ -> :, ndims(t) - 2)..., 2, :)
-    v = view(t, ntuple(_ -> :, ndims(t) - 2)..., 3, :)
-    q .*= m.rescale_factor
-
-    # q, k, v: (..., L, H, head_width) -> (B, H, L, head_width)
-    q_bh = permutedims(q, (1, 3, 2, 4))
-    k_bh = permutedims(k, (1, 3, 2, 4))
-    v_bh = permutedims(v, (1, 3, 2, 4))
-    B = size(q_bh, 1)
-    H = size(q_bh, 2)
-    L = size(q_bh, 3)
-    D = size(q_bh, 4)
-
-    # flatten batch*head for batched matmul: (L, D, B*H)
-    q3 = permutedims(reshape(q_bh, B * H, L, D), (2, 3, 1))
-    k3 = permutedims(reshape(k_bh, B * H, L, D), (2, 3, 1))
-    v3 = permutedims(reshape(v_bh, B * H, L, D), (2, 3, 1))
-
-    # attention logits: (L, L, B*H)
-    a = NNlib.batched_mul(q3, permutedims(k3, (2, 1, 3)))
-
-    if bias !== nothing
-        # bias: (..., L, L, H) -> (..., H, L, L)
-        bias_h = permutedims(bias, (1:ndims(bias)-3..., ndims(bias), ndims(bias) - 2, ndims(bias) - 1))
-        # reshape to (L, L, B*H)
-        b_perm = permutedims(bias_h, (ndims(bias_h) - 1, ndims(bias_h), 1:(ndims(bias_h) - 2)...))
-        b3 = reshape(b_perm, size(b_perm, 1), size(b_perm, 2), :)
-        a .+= b3
-    end
-
-    if mask !== nothing
-        # mask: (B, L) -> expand to (B, H, Lq, Lk), masking keys only (like PyTorch implementation)
-        B, L = size(mask, 1), size(mask, 2)
-        mask_k = reshape(mask, B, 1, 1, L)
-        mask_k = repeat(mask_k, 1, m.num_heads, L, 1)
-        neg_inf = oftype(zero(eltype(a)), -Inf)
-        mask_bias = ifelse.(mask_k .== 1, zero(eltype(a)), neg_inf)
-        # convert to bias (L, L, B*H)
-        mb_perm = permutedims(mask_bias, (3, 4, 1, 2))
-        mb3 = reshape(mb_perm, size(mb_perm, 1), size(mb_perm, 2), :)
-        a .+= mb3
-    end
-
-    a = NNlib.softmax(a; dims=2)
-
-    # output: (L, head_width, B*H)
-    o = NNlib.batched_mul(a, v3)
-    # reshape back to (B, L, H, head_width)
-    o = reshape(o, L, D, B, H)
-    # order as (B, L, D, H) so flattening matches PyTorch's (..., h, c) -> (..., h*c)
-    o = permutedims(o, (3, 1, 2, 4))
-    # (B, L, H * head_width)
-    o = reshape(o, B, L, H * D)
-
-    if m.gated
-        g = NNlib.sigmoid.(m.g_proj(x))
-        o = g .* o
-    end
-
-    y = m.o_proj(o)
-    return y, nothing
-end
-
-@concrete struct ESMFoldAttentionJL <: Onion.Layer
-    proj
-    o_proj
-    g_proj
-    num_heads::Int
-    head_width::Int
-    gated::Bool
-    rescale_factor::Float32
-end
-
-@layer ESMFoldAttentionJL
-
-function ESMFoldAttentionJL(embed_dim::Int, num_heads::Int, head_width::Int; gated::Bool=false)
-    proj = LinearFirst(embed_dim, embed_dim * 3; bias=false)
-    o_proj = LinearFirst(embed_dim, embed_dim; bias=true)
-    g_proj = gated ? LinearFirst(embed_dim, embed_dim; bias=true) : nothing
-    rescale_factor = Float32(head_width)^-0.5f0
-    return ESMFoldAttentionJL(proj, o_proj, g_proj, num_heads, head_width, gated, rescale_factor)
-end
-
-function (m::ESMFoldAttentionJL)(x::AbstractArray; mask=nothing, bias=nothing)
     # x: (C, L, B)
     t = m.proj(x)
     # Split feature dim in head-major order like PyTorch (per-head qkv).
@@ -220,43 +126,13 @@ end
 @layer SequenceToPair
 
 function SequenceToPair(sequence_state_dim::Int, inner_dim::Int, pairwise_state_dim::Int)
-    layernorm = LayerNormLast(sequence_state_dim)
-    proj = LinearLast(sequence_state_dim, inner_dim * 2)
-    o_proj = LinearLast(2 * inner_dim, pairwise_state_dim)
+    layernorm = LayerNormFirst(sequence_state_dim)
+    proj = LinearFirst(sequence_state_dim, inner_dim * 2)
+    o_proj = LinearFirst(2 * inner_dim, pairwise_state_dim)
     return SequenceToPair(layernorm, proj, o_proj)
 end
 
 function (m::SequenceToPair)(sequence_state)
-    s = m.layernorm(sequence_state)
-    s = m.proj(s)
-    inner_dim = size(s, ndims(s)) ÷ 2
-    q = _view_last1(s, 1:inner_dim)
-    k = _view_last1(s, (inner_dim + 1):(2 * inner_dim))
-    q_exp = reshape(q, size(q, 1), 1, size(q, 2), size(q, 3))
-    k_exp = reshape(k, size(k, 1), size(k, 2), 1, size(k, 3))
-    prod = q_exp .* k_exp
-    diff = q_exp .- k_exp
-    x = cat(prod, diff; dims=ndims(prod))
-    x = m.o_proj(x)
-    return x
-end
-
-@concrete struct SequenceToPairJL <: Onion.Layer
-    layernorm
-    proj
-    o_proj
-end
-
-@layer SequenceToPairJL
-
-function SequenceToPairJL(sequence_state_dim::Int, inner_dim::Int, pairwise_state_dim::Int)
-    layernorm = LayerNormFirst(sequence_state_dim)
-    proj = LinearFirst(sequence_state_dim, inner_dim * 2)
-    o_proj = LinearFirst(2 * inner_dim, pairwise_state_dim)
-    return SequenceToPairJL(layernorm, proj, o_proj)
-end
-
-function (m::SequenceToPairJL)(sequence_state)
     # sequence_state: (C_s, L, B)
     s = m.layernorm(sequence_state)
     s = m.proj(s)
@@ -280,30 +156,12 @@ end
 @layer PairToSequence
 
 function PairToSequence(pairwise_state_dim::Int, num_heads::Int)
-    layernorm = LayerNormLast(pairwise_state_dim)
-    linear = LinearLast(pairwise_state_dim, num_heads; bias=false)
+    layernorm = LayerNormFirst(pairwise_state_dim)
+    linear = LinearFirst(pairwise_state_dim, num_heads; bias=false)
     return PairToSequence(layernorm, linear)
 end
 
 function (m::PairToSequence)(pairwise_state)
-    z = m.layernorm(pairwise_state)
-    return m.linear(z)
-end
-
-@concrete struct PairToSequenceJL <: Onion.Layer
-    layernorm
-    linear
-end
-
-@layer PairToSequenceJL
-
-function PairToSequenceJL(pairwise_state_dim::Int, num_heads::Int)
-    layernorm = LayerNormFirst(pairwise_state_dim)
-    linear = LinearFirst(pairwise_state_dim, num_heads; bias=false)
-    return PairToSequenceJL(layernorm, linear)
-end
-
-function (m::PairToSequenceJL)(pairwise_state)
     # pairwise_state: (C_z, L, L, B)
     z = m.layernorm(pairwise_state)
     return m.linear(z)
@@ -319,39 +177,14 @@ end
 @layer ResidueMLP
 
 function ResidueMLP(embed_dim::Int, inner_dim::Int; dropout::Real=0)
-    norm = LayerNormLast(embed_dim)
-    fc1 = LinearLast(embed_dim, inner_dim)
-    fc2 = LinearLast(inner_dim, embed_dim)
-    drop = SharedDropout(dropout, 1)
-    return ResidueMLP(norm, fc1, fc2, drop)
-end
-
-function (m::ResidueMLP)(x)
-    y = m.norm(x)
-    y = max.(m.fc1(y), 0f0)
-    y = m.fc2(y)
-    y = m.dropout(y)
-    return x .+ y
-end
-
-@concrete struct ResidueMLPJL <: Onion.Layer
-    norm
-    fc1
-    fc2
-    dropout
-end
-
-@layer ResidueMLPJL
-
-function ResidueMLPJL(embed_dim::Int, inner_dim::Int; dropout::Real=0)
     norm = LayerNormFirst(embed_dim)
     fc1 = LinearFirst(embed_dim, inner_dim)
     fc2 = LinearFirst(inner_dim, embed_dim)
     drop = SharedDropout(dropout, 3)
-    return ResidueMLPJL(norm, fc1, fc2, drop)
+    return ResidueMLP(norm, fc1, fc2, drop)
 end
 
-function (m::ResidueMLPJL)(x)
+function (m::ResidueMLP)(x)
     y = m.norm(x)
     y = max.(m.fc1(y), 0f0)
     y = m.fc2(y)
@@ -456,11 +289,6 @@ function Statistics.mean(cm::CategoricalMixture)
 end
 
 function categorical_lddt(logits; bins::Int=50)
-    out = Statistics.mean(CategoricalMixture(logits, bins))
-    return dropdims(out; dims=ndims(out))
-end
-
-function categorical_lddt_jl(logits; bins::Int=50)
     v = range(0f0, 1f0; length=bins + 1)
     centers = (v[1:end-1] .+ v[2:end]) ./ 2
     shape = ntuple(i -> (i == ndims(logits) ? length(centers) : 1), ndims(logits))
