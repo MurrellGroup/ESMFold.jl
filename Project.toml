@@ -1,7 +1,7 @@
 name = "ESMFold"
 uuid = "992ade7d-a23b-44e1-bfa9-f18d3a6e7567"
-authors = ["Ben Murrell"]
 version = "1.0.0-DEV"
+authors = ["Ben Murrell"]
 
 [deps]
 BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
@@ -28,6 +28,7 @@ NNlib = "0.9.33"
 NPZ = "0.4.3"
 Onion = "0.2.18"
 SpecialFunctions = "2"
+Statistics = "1"
 julia = "1.10"
 
 [extras]
