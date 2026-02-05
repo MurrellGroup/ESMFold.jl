@@ -201,7 +201,7 @@ function infer(
     masking_pattern = nothing,
     num_recycles = nothing,
     residue_index_offset::Int = 512,
-    chain_linker::AbstractString = "G"^25,
+    chain_linker::Union{AbstractString,Int} = "G"^25,
 )
     seqs = isa(sequences, AbstractString) ? [sequences] : sequences
 
@@ -255,13 +255,45 @@ function output_to_pdb(m::ESMFoldModel, output::AbstractDict)
     return output_to_pdb(output)
 end
 
-function infer_pdbs(m::ESMFoldModel, seqs::AbstractVector{<:AbstractString}; kwargs...)
-    output = infer(m, seqs; kwargs...)
+function infer_pdbs(
+    m::ESMFoldModel,
+    seqs::AbstractVector{<:AbstractString};
+    residx = nothing,
+    masking_pattern = nothing,
+    num_recycles = nothing,
+    residue_index_offset::Int = 512,
+    chain_linker::Union{AbstractString,Int} = "G"^25,
+)
+    output = infer(
+        m,
+        seqs;
+        residx = residx,
+        masking_pattern = masking_pattern,
+        num_recycles = num_recycles,
+        residue_index_offset = residue_index_offset,
+        chain_linker = chain_linker,
+    )
     return output_to_pdb(output)
 end
 
-function infer_pdb(m::ESMFoldModel, seq::AbstractString; kwargs...)
-    return infer_pdbs(m, [seq]; kwargs...)[1]
+function infer_pdb(
+    m::ESMFoldModel,
+    seq::AbstractString;
+    residx = nothing,
+    masking_pattern = nothing,
+    num_recycles = nothing,
+    residue_index_offset::Int = 512,
+    chain_linker::Union{AbstractString,Int} = "G"^25,
+)
+    return infer_pdbs(
+        m,
+        [seq];
+        residx = residx,
+        masking_pattern = masking_pattern,
+        num_recycles = num_recycles,
+        residue_index_offset = residue_index_offset,
+        chain_linker = chain_linker,
+    )[1]
 end
 
 function confidence_metrics(output::AbstractDict)

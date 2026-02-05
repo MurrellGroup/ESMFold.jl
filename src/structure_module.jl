@@ -453,7 +453,7 @@ function (m::StructureModule)(evoformer_output_dict, aatype, mask=nothing)
 
         rigids = compose_q_update_vec(rigids, m.bb_update(s))
 
-        backb_to_global = Rigid(Rotation(rot_mats=get_rot_mats(rigids.rots)), rigids.trans)
+        backb_to_global = Rigid(RotMatRotation(get_rot_mats(rigids.rots)), rigids.trans)
         backb_to_global = scale_translation(backb_to_global, m.cfg.trans_scale_factor)
 
         unnormalized_angles, angles = m.angle_resnet(s, s_initial) # (2, 7, L, B)

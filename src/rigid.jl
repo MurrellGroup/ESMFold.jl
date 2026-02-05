@@ -21,19 +21,23 @@ end
 
 # Julia-convention (feature-first, batch-last) rigid utilities.
 
-struct Rotation
-    rot_mats::Union{AbstractArray,Nothing}
-    quats::Union{AbstractArray,Nothing}
+abstract type AbstractRotation end
+
+struct RotMatRotation{T<:AbstractArray} <: AbstractRotation
+    rot_mats::T
 end
 
-function Rotation(; rot_mats=nothing, quats=nothing, normalize_quats::Bool=true)
-    if (rot_mats === nothing) == (quats === nothing)
-        error("Exactly one of rot_mats or quats must be provided")
-    end
-    if quats !== nothing && normalize_quats
-        quats = quats ./ sqrt.(sum(quats .^ 2; dims=1))
-    end
-    return Rotation(rot_mats, quats)
+struct QuatRotation{T<:AbstractArray} <: AbstractRotation
+    quats::T
+end
+
+function rot_from_mat(rot_mats::AbstractArray)
+    return RotMatRotation(rot_mats)
+end
+
+function rot_from_quat(quats::AbstractArray; normalize::Bool=true)
+    q = normalize ? quats ./ sqrt.(sum(quats .^ 2; dims=1)) : quats
+    return QuatRotation(q)
 end
 
 function rot_matmul_first(a::AbstractArray, b::AbstractArray)
@@ -166,45 +170,35 @@ function rotation_identity(shape::Tuple, like::AbstractArray; fmt::Symbol=:quat)
         eye = reshape(eye, 3, 3, ntuple(_ -> 1, length(shape))...)
         rot = repeat(eye, 1, 1, shape...)
         rot = to_device(rot, like, eltype(like))
-        return Rotation(rot_mats=rot)
+        return RotMatRotation(rot)
     elseif fmt == :quat
         zero = zeros_like(like, eltype(like), 1, shape...)
         one = ones_like(like, eltype(like), 1, shape...)
         q = cat(one, zero, zero, zero; dims=1)
-        return Rotation(quats=q, normalize_quats=false)
+        return QuatRotation(q)
     else
         error("Unknown rotation format: $fmt")
     end
 end
 
-function get_rot_mats(r::Rotation)
-    if r.rot_mats !== nothing
-        return r.rot_mats
-    end
-    @assert r.quats !== nothing
-    return quat_to_rot_first(r.quats)
-end
+get_rot_mats(r::RotMatRotation) = r.rot_mats
+get_rot_mats(r::QuatRotation) = quat_to_rot_first(r.quats)
 
-function get_quats(r::Rotation)
-    if r.quats !== nothing
-        return r.quats
-    end
-    @assert r.rot_mats !== nothing
-    error("rot_to_quat_first not implemented")
-end
+get_quats(r::QuatRotation) = r.quats
+get_quats(::RotMatRotation) = error("rot_to_quat_first not implemented")
 
-function compose_q_update_vec(r::Rotation, q_update_vec::AbstractArray; normalize_quats::Bool=true)
-    q = get_quats(r)
+function compose_q_update_vec(r::QuatRotation, q_update_vec::AbstractArray; normalize_quats::Bool=true)
+    q = r.quats
     new_quats = q .+ quat_multiply_by_vec_first(q, q_update_vec)
     if normalize_quats
         new_quats = new_quats ./ sqrt.(sum(new_quats .^ 2; dims=1))
     end
-    return Rotation(quats=new_quats, normalize_quats=false)
+    return QuatRotation(new_quats)
 end
 
-struct Rigid
-    rots::Rotation
-    trans::AbstractArray
+struct Rigid{R<:AbstractRotation,T<:AbstractArray}
+    rots::R
+    trans::T
 end
 
 function rigid_identity(shape::Tuple, like::AbstractArray; fmt::Symbol=:quat)
@@ -213,7 +207,7 @@ function rigid_identity(shape::Tuple, like::AbstractArray; fmt::Symbol=:quat)
     return Rigid(rots, trans)
 end
 
-function apply_rotation(r::Rotation, pts::AbstractArray)
+function apply_rotation(r::AbstractRotation, pts::AbstractArray)
     rot = get_rot_mats(r)
     return rot_vec_mul_first(rot, pts)
 end
@@ -305,12 +299,12 @@ function compose(r1::Rigid, r2::Rigid)
     trans2 = _align_trans_first(r2.trans, batch_dims)
     new_rot = rot_matmul_first(rot1, rot2)
     new_trans = rot_vec_mul_first(rot1, trans2) .+ trans1
-    return Rigid(Rotation(rot_mats=new_rot), new_trans)
+    return Rigid(RotMatRotation(new_rot), new_trans)
 end
 
 function rigid_index(r::Rigid, inds...)
     rot = get_rot_mats(r.rots)
     rot = view(rot, :, :, inds...)
     trans = view(r.trans, :, inds...)
-    return Rigid(Rotation(rot_mats=rot), trans)
+    return Rigid(RotMatRotation(rot), trans)
 end

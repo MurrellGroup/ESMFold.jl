@@ -5,7 +5,7 @@ using NNlib
 function rigid_from_tensor_4x4(t::AbstractArray)
     rot = _view_first2(t, 1:3, 1:3)
     trans = _view_first2(t, 1:3, 4)
-    return Rigid(Rotation(rot_mats=rot), trans)
+    return Rigid(RotMatRotation(rot), trans)
 end
 
 function torsion_angles_to_frames(r::Rigid, alpha::AbstractArray, aatype::AbstractArray, default_frames::AbstractArray)
@@ -61,7 +61,7 @@ function torsion_angles_to_frames(r::Rigid, alpha::AbstractArray, aatype::Abstra
     trans_chi4 = reshape(chi4_frame_to_bb.trans, 3, 1, size(trans, 3), size(trans, 4))
     rot_new = cat(rot_first, rot_chi2, rot_chi3, rot_chi4; dims=3)
     trans_new = cat(trans_first, trans_chi2, trans_chi3, trans_chi4; dims=2)
-    all_frames_to_bb = Rigid(Rotation(rot_mats=rot_new), trans_new)
+    all_frames_to_bb = Rigid(RotMatRotation(rot_new), trans_new)
 
     all_frames_to_global = compose(r, all_frames_to_bb)
     return all_frames_to_global

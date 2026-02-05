@@ -197,40 +197,52 @@ end
 function encode_sequence(
     seq::AbstractString;
     residue_index_offset::Int=512,
-    chain_linker::AbstractString="G"^25,
+    chain_linker::Union{AbstractString,Int}="G"^25,
 )
     chains = split(seq, ":")
-    full_seq = join(chains, chain_linker)
+    full_seq = chain_linker isa AbstractString ? join(chains, chain_linker) : join(chains, "")
     unk_idx = restype_order_with_x["X"]
     encoded = [get(restype_order_with_x, string(aa), unk_idx) for aa in full_seq]
-    residx = collect(0:(length(encoded) - 1))
-
-    if residue_index_offset > 0
-        start = 1
-        n_chains = length(chains)
-        for (i, chain) in enumerate(chains)
-            len_chain = length(chain)
-            if i < n_chains
-                len_chain += length(chain_linker)
-            end
-            residx[start:(start + len_chain - 1)] .+= (i - 1) * residue_index_offset
-            start += len_chain
-        end
-    end
-
+    residx = Int[]
     linker_mask = ones(Float32, length(encoded))
     chain_index = Int[]
-    offset = 0
-    n_chains = length(chains)
-    for (i, chain) in enumerate(chains)
-        if i > 1
-            append!(chain_index, fill(i - 2, length(chain_linker)))
+
+    if chain_linker isa AbstractString
+        residx = collect(0:(length(encoded) - 1))
+        if residue_index_offset > 0
+            start = 1
+            n_chains = length(chains)
+            for (i, chain) in enumerate(chains)
+                len_chain = length(chain)
+                if i < n_chains
+                    len_chain += length(chain_linker)
+                end
+                residx[start:(start + len_chain - 1)] .+= (i - 1) * residue_index_offset
+                start += len_chain
+            end
         end
-        append!(chain_index, fill(i - 1, length(chain)))
-        offset += length(chain)
-        if i < n_chains && length(chain_linker) > 0
-            linker_mask[(offset + 1):(offset + length(chain_linker))] .= 0
-            offset += length(chain_linker)
+
+        offset = 0
+        n_chains = length(chains)
+        for (i, chain) in enumerate(chains)
+            if i > 1
+                append!(chain_index, fill(i - 2, length(chain_linker)))
+            end
+            append!(chain_index, fill(i - 1, length(chain)))
+            offset += length(chain)
+            if i < n_chains && length(chain_linker) > 0
+                linker_mask[(offset + 1):(offset + length(chain_linker))] .= 0
+                offset += length(chain_linker)
+            end
+        end
+    else
+        gap = Int(chain_linker)
+        start = 0
+        for (i, chain) in enumerate(chains)
+            len_chain = length(chain)
+            append!(residx, collect(start:(start + len_chain - 1)))
+            append!(chain_index, fill(i - 1, len_chain))
+            start = (start + len_chain - 1) + gap
         end
     end
 
@@ -240,7 +252,7 @@ end
 function batch_encode_sequences(
     sequences::AbstractVector{<:AbstractString};
     residue_index_offset::Int=512,
-    chain_linker::AbstractString="G"^25,
+    chain_linker::Union{AbstractString,Int}="G"^25,
 )
     aatype_list = Vector{Vector{Int}}()
     residx_list = Vector{Vector{Int}}()
