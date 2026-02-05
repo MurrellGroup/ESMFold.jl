@@ -21,12 +21,15 @@ export ESMFoldEmbedConfig, ESMFoldEmbed
 export FoldingTrunkConfig, FoldingTrunk
 export StructureModuleConfig
 export ESMFoldConfig, ESMFoldModel
+export ESMFoldModelJL
 export load_esmfold_npz!, load_esm2_npz!, load_esmfold_safetensors!
 export load_ESM, load_ESMFold
 export sequence_to_af2_indices
 export infer, infer_pdb, infer_pdbs, output_to_pdb
 export confidence_metrics
 export set_training!, is_training
+export make_atom14_masks_jl!
+export compute_tm_jl, compute_predicted_aligned_error_jl, categorical_lddt_jl
 
 include("alphabet.jl")
 include("residue_constants.jl")
