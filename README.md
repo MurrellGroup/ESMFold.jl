@@ -4,6 +4,28 @@ A Julia port of the **full ESMFold model**: ESM2 embeddings + folding trunk + st
 This repo runs end‑to‑end folding on CPU, and will run on GPU when you move the model/tensors
 to the GPU.
 
+## Installation
+
+Some dependencies (Onion, Einops, BatchedTransformations, etc.) live in the
+MurrellGroup registry. Add it **once** alongside the default General registry:
+
+```julia
+using Pkg
+Pkg.Registry.add("https://github.com/MurrellGroup/MurrellGroupRegistry")
+```
+
+Then install ESMFold.jl (from a local clone):
+
+```julia
+Pkg.develop(path="path/to/ESMFold.jl")
+```
+
+Or, if the package is registered in the MurrellGroup registry:
+
+```julia
+Pkg.add("ESMFold")
+```
+
 ## Quickstart (single sequence)
 
 ```julia
@@ -97,9 +119,30 @@ resulting PDB against `scripts/output_ELLKKLLEELKG.pdb`:
 julia --project=. scripts/test.jl
 ```
 
+## GPU Inference
+
+ESMFold.jl has no direct CUDA dependency. To run on GPU, add `CUDA.jl` and
+`cuDNN.jl` to your own project environment, move the model with `Flux.gpu`,
+and call `infer` as usual:
+
+```julia
+using CUDA, cuDNN
+using Flux
+using ESMFold
+
+model = load_ESMFold()
+gpu_model = Flux.gpu(model)
+
+output = infer(gpu_model, "ELLKKLLEELKG")
+pdb = output_to_pdb(output)[1]
+```
+
+All intermediate tensors automatically follow the model to the GPU.
+`output_to_pdb` handles moving results back to CPU.
+
 ## Notes
 
-- CPU‑only execution is supported.
+- Both CPU and GPU execution are supported.
 - The implementation follows the ESMFold Python model closely and is parity‑checked
   against the official model within floating‑point tolerances.
 

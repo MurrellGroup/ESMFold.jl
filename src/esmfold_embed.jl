@@ -151,10 +151,9 @@ function _compute_language_model_representations(
     esmaa2 = hcat(bos, esmaa, eos)
 
     lengths = sum(esmaa2 .!= pad, dims=2)
-    for b in 1:batch_size
-        idx = Int(lengths[b]) + 1
-        esmaa2[b, idx] = eosi
-    end
+    positions = to_device(reshape(1:size(esmaa2, 2), 1, :), esmaa2, Int)
+    eos_mask = positions .== (lengths .+ 1)
+    esmaa2 = ifelse.(eos_mask, eosi, esmaa2)
 
     res = m.esm(
         esmaa2;

@@ -7,8 +7,8 @@ struct ESM2Config
 end
 
 struct ESM2Output
-    logits::Array
-    representations::Dict{Int,Array}
+    logits::AbstractArray
+    representations::Dict{Int,<:AbstractArray}
     attentions
 end
 
@@ -173,12 +173,12 @@ function (model::ESM2)(
     x .= x .* reshape(1 .- padding_mask_tb, 1, size(x, 2), size(x, 3))
 
     repr_set = Set(repr_layers)
-    hidden_representations = Dict{Int,Array}()
+    hidden_representations = Dict{Int,AbstractArray}()
     if 0 in repr_set
         hidden_representations[0] = permutedims(x, (3, 2, 1))
     end
 
-    attn_weights_all = need_head_weights ? Vector{Array}(undef, model.num_layers) : nothing
+    attn_weights_all = need_head_weights ? Vector{AbstractArray}(undef, model.num_layers) : nothing
 
     padding_mask_for_attn = any(padding_mask) ? padding_mask : nothing
 

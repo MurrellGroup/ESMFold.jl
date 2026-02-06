@@ -178,11 +178,12 @@ function (m::ESMFoldModel)(
     ptm_logits = m.ptm_head(structure[:s_z])
     structure[:ptm_logits] = ptm_logits
 
-    seqlen = sum(mask .== 1; dims=1)
-    ptm_vals = Vector{eltype(ptm_logits)}(undef, size(ptm_logits, 4))
-    for b in 1:size(ptm_logits, 4)
-        sl = Int(seqlen[1, b])
-        ptm_vals[b] = compute_tm(ptm_logits[:, 1:sl, 1:sl, b]; max_bin=31, no_bins=m.distogram_bins)
+    seqlen_cpu = Array(sum(mask .== 1; dims=1))
+    ptm_logits_cpu = Array(ptm_logits)
+    ptm_vals = Vector{eltype(ptm_logits_cpu)}(undef, size(ptm_logits_cpu, 4))
+    for b in 1:size(ptm_logits_cpu, 4)
+        sl = Int(seqlen_cpu[1, b])
+        ptm_vals[b] = compute_tm(ptm_logits_cpu[:, 1:sl, 1:sl, b]; max_bin=31, no_bins=m.distogram_bins)
     end
     structure[:ptm] = to_device(reshape(collect(ptm_vals), size(ptm_logits, 4)), ptm_logits, eltype(ptm_logits))
 
