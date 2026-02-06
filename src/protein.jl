@@ -147,13 +147,14 @@ function output_to_pdb(output::AbstractDict)
     final_atom_mask = cpu_out[:atom37_atom_exists]
 
     pdbs = String[]
-    for i in 1:size(cpu_out[:aatype], 1)
-        aa = cpu_out[:aatype][i, :]
-        pred_pos = final_atom_positions[i, :, :, :]
-        mask = final_atom_mask[i, :, :]
-        resid = cpu_out[:residue_index][i, :] .+ 1
-        b_factors = cpu_out[:plddt][i, :, :]
-        chain_index = haskey(cpu_out, :chain_index) ? cpu_out[:chain_index][i, :] : nothing
+    n_batch = size(final_atom_positions, 1)
+    for b in 1:n_batch
+        aa = cpu_out[:aatype][:, b]
+        pred_pos = final_atom_positions[b, :, :, :]
+        mask = permutedims(final_atom_mask[:, :, b], (2, 1)) # (L, 37)
+        resid = cpu_out[:residue_index][:, b] .+ 1
+        b_factors = cpu_out[:plddt][:, b, :]
+        chain_index = haskey(cpu_out, :chain_index) ? cpu_out[:chain_index][:, b] : nothing
         prot = Protein(
             pred_pos,
             vec(aa),

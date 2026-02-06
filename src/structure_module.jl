@@ -1,5 +1,6 @@
 using NNlib
 using Statistics
+import Zygote
 
 struct StructureModuleConfig
     c_s::Int
@@ -39,72 +40,7 @@ function StructureModuleConfig()
     )
 end
 
-@concrete struct AngleResnetBlock <: Onion.Layer
-    linear_1
-    linear_2
-end
-
-@layer AngleResnetBlock
-
-function AngleResnetBlock(c_hidden::Int)
-    linear_1 = LinearLast(c_hidden, c_hidden)
-    linear_2 = LinearLast(c_hidden, c_hidden)
-    return AngleResnetBlock(linear_1, linear_2)
-end
-
-function (m::AngleResnetBlock)(a)
-    s = a
-    a = max.(a, 0f0)
-    a = m.linear_1(a)
-    a = max.(a, 0f0)
-    a = m.linear_2(a)
-    return a .+ s
-end
-
-@concrete struct AngleResnet <: Onion.Layer
-    linear_in
-    linear_initial
-    layers
-    linear_out
-    eps::Float32
-end
-
-@layer AngleResnet
-
-function AngleResnet(c_in::Int, c_hidden::Int, no_blocks::Int, no_angles::Int, epsilon::Float32)
-    linear_in = LinearLast(c_in, c_hidden)
-    linear_initial = LinearLast(c_in, c_hidden)
-    layers = [AngleResnetBlock(c_hidden) for _ in 1:no_blocks]
-    linear_out = LinearLast(c_hidden, no_angles * 2)
-    return AngleResnet(linear_in, linear_initial, layers, linear_out, Float32(epsilon))
-end
-
-function _reshape_last_corder(x::AbstractArray, d1::Int, d2::Int)
-    n = ndims(x)
-    # Move last dimension to front to mimic C-order view semantics.
-    x_perm = permutedims(x, (n, 1:(n - 1)...))
-    y = reshape(x_perm, d2, d1, size(x_perm)[2:end]...)
-    order = vcat(3:ndims(y), 2, 1)
-    return permutedims(y, order)
-end
-
-function (m::AngleResnet)(s, s_initial)
-    s_initial = max.(s_initial, 0f0)
-    s_initial = m.linear_initial(s_initial)
-    s = max.(s, 0f0)
-    s = m.linear_in(s)
-    s = s .+ s_initial
-    for l in m.layers
-        s = l(s)
-    end
-    s = max.(s, 0f0)
-    s = m.linear_out(s)
-    s = _reshape_last_corder(s, div(size(s, ndims(s)), 2), 2)
-    unnormalized = s
-    norm = sqrt.(max.(sum(s .^ 2; dims=ndims(s)), m.eps))
-    s = s ./ norm
-    return unnormalized, s
-end
+# Julia-convention (feature-first, batch-last) structure components.
 
 @concrete struct PointProjection <: Onion.Layer
     linear
@@ -115,26 +51,16 @@ end
 @layer PointProjection
 
 function PointProjection(c_hidden::Int, num_points::Int, no_heads::Int)
-    linear = LinearLast(c_hidden, no_heads * 3 * num_points)
+    linear = LinearFirst(c_hidden, no_heads * 3 * num_points)
     return PointProjection(linear, num_points, no_heads)
 end
 
 function (m::PointProjection)(activations, rigids::Rigid)
-    raw = m.linear(activations)
-    B = size(raw, 1)
-    L = size(raw, 2)
+    raw = m.linear(activations) # (3*H*P, L, B)
     H = m.no_heads
     P = m.num_points
-    points_local = similar(raw, B, L, H, P, 3)
-    @inbounds for axis in 1:3
-        base = (axis - 1) * H * P
-        for h in 1:H
-            for p in 1:P
-                idx = base + (h - 1) * P + p
-                points_local[:, :, h, p, axis] .= raw[:, :, idx]
-            end
-        end
-    end
+    raw = reshape(raw, P, H, 3, size(raw, 2), size(raw, 3))
+    points_local = permutedims(raw, (3, 1, 2, 4, 5)) # (3, P, H, L, B)
     points_global = apply_rigid(rigids, points_local)
     return points_global
 end
@@ -160,13 +86,13 @@ end
 @layer InvariantPointAttention
 
 function InvariantPointAttention(c_s::Int, c_z::Int, c_hidden::Int, no_heads::Int, no_qk_points::Int, no_v_points::Int; inf::Real=1e5, eps::Real=1e-8)
-    linear_q = LinearLast(c_s, c_hidden * no_heads)
+    linear_q = LinearFirst(c_s, c_hidden * no_heads)
     linear_q_points = PointProjection(c_s, no_qk_points, no_heads)
-    linear_kv = LinearLast(c_s, 2 * c_hidden * no_heads)
+    linear_kv = LinearFirst(c_s, 2 * c_hidden * no_heads)
     linear_kv_points = PointProjection(c_s, no_qk_points + no_v_points, no_heads)
-    linear_b = LinearLast(c_z, no_heads)
+    linear_b = LinearFirst(c_z, no_heads)
     head_weights = fill(0.54132485f0, no_heads)
-    linear_out = LinearLast(no_heads * (c_z + c_hidden + no_v_points * 4), c_s)
+    linear_out = LinearFirst(no_heads * (c_z + c_hidden + no_v_points * 4), c_s)
     return InvariantPointAttention(
         c_s,
         c_z,
@@ -187,30 +113,18 @@ function InvariantPointAttention(c_s::Int, c_z::Int, c_hidden::Int, no_heads::In
 end
 
 function (m::InvariantPointAttention)(s, z, r::Rigid, mask)
-    # q, k, v
+    # s: (C_s, L, B), z: (C_z, L, L, B), mask: (L, B)
     q = m.linear_q(s)
-    q = reshape(q, size(q)[1:end-1]..., m.c_hidden, m.no_heads)
-    n = ndims(q)
-    q = permutedims(q, vcat(collect(1:(n - 2)), n, n - 1)) # (..., L, H, C)
-
-    q_pts = m.linear_q_points(s, r)
-
+    q = reshape(q, m.c_hidden, m.no_heads, size(q, 2), size(q, 3)) # (C, H, L, B)
     kv = m.linear_kv(s)
-    kv = reshape(kv, size(kv)[1:end-1]..., 2 * m.c_hidden, m.no_heads)
-    n = ndims(kv)
-    kv = permutedims(kv, vcat(collect(1:(n - 2)), n, n - 1)) # (..., L, H, 2C)
-    k = _view_last1(kv, 1:m.c_hidden)
-    v = _view_last1(kv, (m.c_hidden + 1):(2 * m.c_hidden))
+    kv = reshape(kv, 2 * m.c_hidden, m.no_heads, size(kv, 2), size(kv, 3)) # (2C, H, L, B)
+    k = view(kv, 1:m.c_hidden, :, :, :)
+    v = view(kv, (m.c_hidden + 1):(2 * m.c_hidden), :, :, :)
 
-    kv_pts = m.linear_kv_points(s, r)
-    k_pts = _view_last2(kv_pts, 1:m.no_qk_points, Colon())
-    v_pts = _view_last2(kv_pts, (m.no_qk_points + 1):(m.no_qk_points + m.no_v_points), Colon())
+    q_bhlc = permutedims(q, (4, 2, 3, 1)) # (B, H, L, C)
+    k_bhlc = permutedims(k, (4, 2, 3, 1)) # (B, H, L, C)
+    k_bhcl = permutedims(k_bhlc, (1, 2, 4, 3)) # (B, H, C, L)
 
-    b = m.linear_b(z)
-
-    # attention logits
-    q_bhlc = permutedims(q, (1, 3, 2, 4)) # (B, H, L, C)
-    k_bhcl = permutedims(k, (1, 3, 4, 2)) # (B, H, C, L)
     B = size(q_bhlc, 1)
     H = size(q_bhlc, 2)
     L = size(q_bhlc, 3)
@@ -219,13 +133,23 @@ function (m::InvariantPointAttention)(s, z, r::Rigid, mask)
     k3 = permutedims(reshape(k_bhcl, B * H, C, L), (2, 3, 1)) # (C, L, B*H)
     a3 = NNlib.batched_mul(q3, k3)
     a = reshape(a3, L, L, B, H)
-    a = permutedims(a, (3, 4, 1, 2))
+    a = permutedims(a, (3, 4, 1, 2)) # (B, H, L, L)
 
-    a .*= sqrt(1f0 / (3f0 * m.c_hidden))
-    b_perm = permutedims(b, (1, 4, 2, 3))
-    a .+= sqrt(1f0 / 3f0) .* b_perm
+    a = a .* sqrt(1f0 / (3f0 * m.c_hidden))
 
-    # point attention
+    b = m.linear_b(z) # (H, L, L, B)
+    b_perm = permutedims(b, (4, 1, 2, 3)) # (B, H, L, L)
+    a = a .+ sqrt(1f0 / 3f0) .* b_perm
+
+    q_pts = m.linear_q_points(s, r) # (3, Pq, H, L, B)
+    kv_pts = m.linear_kv_points(s, r) # (3, Pq+Pv, H, L, B)
+    k_pts = view(kv_pts, :, 1:m.no_qk_points, :, :, :)
+    v_pts = view(kv_pts, :, (m.no_qk_points + 1):(m.no_qk_points + m.no_v_points), :, :, :)
+
+    q_pts = permutedims(q_pts, (5, 4, 3, 2, 1)) # (B, L, H, Pq, 3)
+    k_pts = permutedims(k_pts, (5, 4, 3, 2, 1)) # (B, L, H, Pq, 3)
+    v_pts = permutedims(v_pts, (5, 4, 3, 2, 1)) # (B, L, H, Pv, 3)
+
     q_exp = reshape(q_pts, size(q_pts, 1), size(q_pts, 2), 1, size(q_pts, 3), size(q_pts, 4), size(q_pts, 5))
     k_exp = reshape(k_pts, size(k_pts, 1), 1, size(k_pts, 2), size(k_pts, 3), size(k_pts, 4), size(k_pts, 5))
     pt_att = q_exp .- k_exp
@@ -236,18 +160,17 @@ function (m::InvariantPointAttention)(s, z, r::Rigid, mask)
     hw = reshape(head_weights, 1, 1, 1, m.no_heads, 1, 1)
     pt_att = sum(pt_att .* hw; dims=5) .* (-0.5f0)
     pt_att = dropdims(pt_att; dims=(5, 6))
-    pt_att = permutedims(pt_att, (1, 4, 2, 3))
+    pt_att = permutedims(pt_att, (1, 4, 2, 3)) # (B, H, L, L)
 
-    square_mask = reshape(mask, size(mask, 1), 1, size(mask, 2)) .* reshape(mask, size(mask, 1), size(mask, 2), 1)
+    square_mask = reshape(mask, size(mask, 1), 1, size(mask, 2)) .* reshape(mask, 1, size(mask, 1), size(mask, 2))
+    square_mask = permutedims(square_mask, (3, 1, 2)) # (B, L, L)
     square_mask = m.inf .* (square_mask .- 1)
-    a .+= pt_att
-    a .+= reshape(square_mask, size(square_mask, 1), 1, size(square_mask, 2), size(square_mask, 3))
+    a = a .+ pt_att
+    a = a .+ reshape(square_mask, size(square_mask, 1), 1, size(square_mask, 2), size(square_mask, 3))
 
-    # softmax over last dim
     a = NNlib.softmax(a; dims=4)
 
-    # output from values
-    v_bhlc = permutedims(v, (1, 3, 2, 4)) # (B, H, L, C)
+    v_bhlc = permutedims(v, (4, 2, 3, 1)) # (B, H, L, C)
     a3 = reshape(permutedims(a, (3, 4, 1, 2)), L, L, :) # (L, L, B*H)
     v3 = permutedims(reshape(v_bhlc, B * H, L, C), (2, 3, 1)) # (L, C, B*H)
     o3 = NNlib.batched_mul(a3, v3) # (L, C, B*H)
@@ -256,7 +179,6 @@ function (m::InvariantPointAttention)(s, z, r::Rigid, mask)
     o = permutedims(o, (1, 2, 4, 3)) # (B, L, C, H)
     o = reshape(o, B, L, H * C)
 
-    # point outputs
     v_pts_x = _view_last1(v_pts, 1)
     v_pts_y = _view_last1(v_pts, 2)
     v_pts_z = _view_last1(v_pts, 3)
@@ -265,7 +187,7 @@ function (m::InvariantPointAttention)(s, z, r::Rigid, mask)
     vpy = permutedims(v_pts_y, (2, 4, 1, 3))
     vpz = permutedims(v_pts_z, (2, 4, 1, 3))
 
-    vpx3 = reshape(vpx, L, m.no_v_points, :) 
+    vpx3 = reshape(vpx, L, m.no_v_points, :)
     vpy3 = reshape(vpy, L, m.no_v_points, :)
     vpz3 = reshape(vpz, L, m.no_v_points, :)
 
@@ -273,16 +195,17 @@ function (m::InvariantPointAttention)(s, z, r::Rigid, mask)
     o_py = NNlib.batched_mul(a3, vpy3)
     o_pz = NNlib.batched_mul(a3, vpz3)
 
-    o_px = reshape(o_px, L, m.no_v_points, size(s, 1), m.no_heads)
-    o_py = reshape(o_py, L, m.no_v_points, size(s, 1), m.no_heads)
-    o_pz = reshape(o_pz, L, m.no_v_points, size(s, 1), m.no_heads)
+    o_px = reshape(o_px, L, m.no_v_points, B, m.no_heads)
+    o_py = reshape(o_py, L, m.no_v_points, B, m.no_heads)
+    o_pz = reshape(o_pz, L, m.no_v_points, B, m.no_heads)
 
     o_px = permutedims(o_px, (3, 1, 4, 2))
     o_py = permutedims(o_py, (3, 1, 4, 2))
     o_pz = permutedims(o_pz, (3, 1, 4, 2))
 
-    o_pt = cat(o_px, o_py, o_pz; dims=5)
-    o_pt = invert_apply_rigid(r, o_pt)
+    o_pt = cat(o_px, o_py, o_pz; dims=5) # (B, L, H, P, 3)
+    o_pt = invert_apply_rigid(r, permutedims(o_pt, (5, 4, 3, 2, 1))) # (3, P, H, L, B)
+    o_pt = permutedims(o_pt, (5, 4, 3, 2, 1)) # (B, L, H, P, 3)
 
     o_pt_norm = sqrt.(sum(o_pt .^ 2; dims=5) .+ m.eps)
     o_pt_norm = dropdims(o_pt_norm; dims=5)
@@ -295,10 +218,9 @@ function (m::InvariantPointAttention)(s, z, r::Rigid, mask)
     o_py = _view_last1(o_pt, 2)
     o_pz = _view_last1(o_pt, 3)
 
-    # pair output
     a_t = permutedims(a, (1, 2, 4, 3))
     a_exp = reshape(a_t, size(a_t, 1), size(a_t, 2), size(a_t, 3), size(a_t, 4), 1)
-    z_swap = permutedims(z, (1, 3, 2, 4))
+    z_swap = permutedims(z, (4, 3, 2, 1))
     z_exp = reshape(z_swap, size(z_swap, 1), 1, size(z_swap, 2), size(z_swap, 3), size(z_swap, 4))
     o_pair = sum(a_exp .* z_exp; dims=3)
     o_pair = dropdims(o_pair; dims=3)
@@ -306,8 +228,14 @@ function (m::InvariantPointAttention)(s, z, r::Rigid, mask)
     o_pair = permutedims(o_pair, (1, 2, 4, 3)) # (B, L, C_z, H)
     o_pair = reshape(o_pair, size(o_pair, 1), size(o_pair, 2), m.no_heads * m.c_z)
 
-    # concat and project
-    concat = cat(o, o_px, o_py, o_pz, o_pt_norm, o_pair; dims=ndims(o))
+    o_feat = permutedims(o, (3, 2, 1)) # (H*C, L, B)
+    o_px = permutedims(o_px, (3, 2, 1)) # (H*P, L, B)
+    o_py = permutedims(o_py, (3, 2, 1))
+    o_pz = permutedims(o_pz, (3, 2, 1))
+    o_pt_norm = permutedims(o_pt_norm, (3, 2, 1))
+    o_pair = permutedims(o_pair, (3, 2, 1))
+
+    concat = cat(o_feat, o_px, o_py, o_pz, o_pt_norm, o_pair; dims=1)
     return m.linear_out(concat)
 end
 
@@ -318,7 +246,7 @@ end
 @layer BackboneUpdate
 
 function BackboneUpdate(c_s::Int)
-    return BackboneUpdate(LinearLast(c_s, 6))
+    return BackboneUpdate(LinearFirst(c_s, 6))
 end
 
 (m::BackboneUpdate)(s) = m.linear(s)
@@ -332,9 +260,9 @@ end
 @layer StructureModuleTransitionLayer
 
 function StructureModuleTransitionLayer(c::Int)
-    linear_1 = LinearLast(c, c)
-    linear_2 = LinearLast(c, c)
-    linear_3 = LinearLast(c, c)
+    linear_1 = LinearFirst(c, c)
+    linear_2 = LinearFirst(c, c)
+    linear_3 = LinearFirst(c, c)
     return StructureModuleTransitionLayer(linear_1, linear_2, linear_3)
 end
 
@@ -356,8 +284,8 @@ end
 
 function StructureModuleTransition(c::Int, num_layers::Int, dropout_rate::Real)
     layers = [StructureModuleTransitionLayer(c) for _ in 1:num_layers]
-    drop = SharedDropout(dropout_rate, 1)
-    layer_norm = LayerNormLast(c)
+    drop = SharedDropout(dropout_rate, 3)
+    layer_norm = LayerNormFirst(c)
     return StructureModuleTransition(layers, drop, layer_norm)
 end
 
@@ -368,6 +296,71 @@ function (m::StructureModuleTransition)(s)
     s = m.dropout(s)
     s = m.layer_norm(s)
     return s
+end
+
+@concrete struct AngleResnetBlock <: Onion.Layer
+    linear_1
+    linear_2
+end
+
+@layer AngleResnetBlock
+
+function AngleResnetBlock(c_hidden::Int)
+    linear_1 = LinearFirst(c_hidden, c_hidden)
+    linear_2 = LinearFirst(c_hidden, c_hidden)
+    return AngleResnetBlock(linear_1, linear_2)
+end
+
+function (m::AngleResnetBlock)(a)
+    s = a
+    a = max.(a, 0f0)
+    a = m.linear_1(a)
+    a = max.(a, 0f0)
+    a = m.linear_2(a)
+    return a .+ s
+end
+
+@concrete struct AngleResnet <: Onion.Layer
+    linear_in
+    linear_initial
+    layers
+    linear_out
+    eps::Float32
+end
+
+@layer AngleResnet
+
+function AngleResnet(c_in::Int, c_hidden::Int, no_blocks::Int, no_angles::Int, epsilon::Float32)
+    linear_in = LinearFirst(c_in, c_hidden)
+    linear_initial = LinearFirst(c_in, c_hidden)
+    layers = [AngleResnetBlock(c_hidden) for _ in 1:no_blocks]
+    linear_out = LinearFirst(c_hidden, no_angles * 2)
+    return AngleResnet(linear_in, linear_initial, layers, linear_out, Float32(epsilon))
+end
+
+function _reshape_first_corder(x::AbstractArray, d1::Int, d2::Int)
+    x_perm = permutedims(x, (2:ndims(x)..., 1))
+    y = reshape(x_perm, size(x_perm)[1:end-1]..., d2, d1)
+    perm = vcat(ndims(y) - 1, ndims(y), collect(1:(ndims(y) - 2)))
+    return permutedims(y, perm)
+end
+
+function (m::AngleResnet)(s, s_initial)
+    s_initial = max.(s_initial, 0f0)
+    s_initial = m.linear_initial(s_initial)
+    s = max.(s, 0f0)
+    s = m.linear_in(s)
+    s = s .+ s_initial
+    for l in m.layers
+        s = l(s)
+    end
+    s = max.(s, 0f0)
+    s = m.linear_out(s)
+    s = _reshape_first_corder(s, div(size(s, 1), 2), 2)
+    unnormalized = s
+    norm = sqrt.(max.(sum(s .^ 2; dims=1), m.eps))
+    s = s ./ norm
+    return unnormalized, s
 end
 
 @concrete struct StructureModule <: Onion.Layer
@@ -389,10 +382,18 @@ end
 
 @layer StructureModule
 
+function _init_residue_constants!(m::StructureModule, like)
+    default_frames = to_device(restype_rigid_group_default_frame, like, eltype(like))
+    group_idx = to_device(restype_atom14_to_rigid_group, like, Int)
+    atom_mask = to_device(restype_atom14_mask, like, eltype(like))
+    lit_positions = to_device(restype_atom14_rigid_group_positions, like, eltype(like))
+    return default_frames, group_idx, atom_mask, lit_positions
+end
+
 function StructureModule(; cfg::StructureModuleConfig=StructureModuleConfig())
-    layer_norm_s = LayerNormLast(cfg.c_s)
-    layer_norm_z = LayerNormLast(cfg.c_z)
-    linear_in = LinearLast(cfg.c_s, cfg.c_s)
+    layer_norm_s = LayerNormFirst(cfg.c_s)
+    layer_norm_z = LayerNormFirst(cfg.c_z)
+    linear_in = LinearFirst(cfg.c_s, cfg.c_s)
     ipa = InvariantPointAttention(
         cfg.c_s,
         cfg.c_z,
@@ -403,8 +404,8 @@ function StructureModule(; cfg::StructureModuleConfig=StructureModuleConfig())
         inf=cfg.inf,
         eps=cfg.epsilon,
     )
-    ipa_dropout = SharedDropout(cfg.dropout_rate, 1)
-    layer_norm_ipa = LayerNormLast(cfg.c_s)
+    ipa_dropout = SharedDropout(cfg.dropout_rate, 3)
+    layer_norm_ipa = LayerNormFirst(cfg.c_s)
     transition = StructureModuleTransition(cfg.c_s, cfg.no_transition_layers, cfg.dropout_rate)
     bb_update = BackboneUpdate(cfg.c_s)
     angle_resnet = AngleResnet(cfg.c_s, cfg.c_resnet, cfg.no_resnet_blocks, cfg.no_angles, cfg.epsilon)
@@ -427,20 +428,12 @@ function StructureModule(; cfg::StructureModuleConfig=StructureModuleConfig())
     )
 end
 
-function _init_residue_constants!(m::StructureModule, like)
-    default_frames = to_device(restype_rigid_group_default_frame, like, eltype(like))
-    group_idx = to_device(restype_atom14_to_rigid_group, like, Int)
-    atom_mask = to_device(restype_atom14_mask, like, eltype(like))
-    lit_positions = to_device(restype_atom14_rigid_group_positions, like, eltype(like))
-    return default_frames, group_idx, atom_mask, lit_positions
-end
-
 function (m::StructureModule)(evoformer_output_dict, aatype, mask=nothing)
-    s = evoformer_output_dict[:single]
-    z = evoformer_output_dict[:pair]
+    s = evoformer_output_dict[:single] # (C_s, L, B)
+    z = evoformer_output_dict[:pair]   # (C_z, L, L, B)
 
     if mask === nothing
-        mask = ones_like(s, size(s)[1:end-1]...)
+        mask = ones_like(s, size(s, 2), size(s, 3))
     end
 
     s = m.layer_norm_s(s)
@@ -449,10 +442,10 @@ function (m::StructureModule)(evoformer_output_dict, aatype, mask=nothing)
     s_initial = s
     s = m.linear_in(s)
 
-    rigids = rigid_identity(size(s)[1:end-1], s; fmt=:quat)
+    rigids = rigid_identity((size(s, 2), size(s, 3)), s; fmt=:quat)
 
-    outputs = Vector{Dict{Symbol,Any}}()
-    for _ in 1:m.cfg.no_blocks
+    outputs = Zygote.Buffer(Vector{Dict{Symbol,Any}}(undef, m.cfg.no_blocks))
+    for i in 1:m.cfg.no_blocks
         s = s .+ m.ipa(s, z, rigids, mask)
         s = m.ipa_dropout(s)
         s = m.layer_norm_ipa(s)
@@ -460,10 +453,10 @@ function (m::StructureModule)(evoformer_output_dict, aatype, mask=nothing)
 
         rigids = compose_q_update_vec(rigids, m.bb_update(s))
 
-        backb_to_global = Rigid(Rotation(rot_mats=get_rot_mats(rigids.rots)), rigids.trans)
+        backb_to_global = Rigid(RotMatRotation(get_rot_mats(rigids.rots)), rigids.trans)
         backb_to_global = scale_translation(backb_to_global, m.cfg.trans_scale_factor)
 
-        unnormalized_angles, angles = m.angle_resnet(s, s_initial)
+        unnormalized_angles, angles = m.angle_resnet(s, s_initial) # (2, 7, L, B)
 
         default_frames, group_idx, atom_mask, lit_positions = _init_residue_constants!(m, angles)
         all_frames_to_global = torsion_angles_to_frames(backb_to_global, angles, aatype, default_frames)
@@ -486,10 +479,10 @@ function (m::StructureModule)(evoformer_output_dict, aatype, mask=nothing)
             :positions => pred_xyz,
             :states => s,
         )
-        push!(outputs, preds)
+        outputs[i] = preds
     end
 
-    out = stack_dicts(outputs)
+    out = stack_dicts(copy(outputs))
     out[:single] = s
     return out
 end

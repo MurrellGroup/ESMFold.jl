@@ -27,11 +27,13 @@ export sequence_to_af2_indices
 export infer, infer_pdb, infer_pdbs, output_to_pdb
 export confidence_metrics
 export set_training!, is_training
+export make_atom14_masks!
+export compute_tm, compute_predicted_aligned_error, categorical_lddt
 
 include("alphabet.jl")
 include("residue_constants.jl")
 include("openfold_utils.jl")
-include("layernorm_last.jl")
+include("layernorm.jl")
 include("rigid.jl")
 include("openfold_feats.jl")
 include("esmfold_misc.jl")

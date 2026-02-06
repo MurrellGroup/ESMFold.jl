@@ -55,18 +55,14 @@ function make_atom14_masks!(protein::AbstractDict)
     restype_atom37_mask = to_device(_restype_atom37_mask, protein_aatype, mask_type)
 
     residx_atom14_to_atom37 = restype_atom14_to_atom37[protein_aatype, :]
-    residx_atom14_mask = restype_atom14_mask[protein_aatype, :]
-
-    protein[:atom14_atom_exists] = residx_atom14_mask
-    # Match OpenFold's 0-based indexing for output tensors.
+    residx_atom14_to_atom37 = permutedims(residx_atom14_to_atom37, (3, 1, 2))
+    protein[:atom14_atom_exists] = permutedims(restype_atom14_mask[protein_aatype, :], (3, 1, 2))
     protein[:residx_atom14_to_atom37] = residx_atom14_to_atom37 .- 1
 
     residx_atom37_to_atom14 = restype_atom37_to_atom14[protein_aatype, :]
-    # Match OpenFold's 0-based indexing for output tensors.
+    residx_atom37_to_atom14 = permutedims(residx_atom37_to_atom14, (3, 1, 2))
     protein[:residx_atom37_to_atom14] = residx_atom37_to_atom14 .- 1
-
-    residx_atom37_mask = restype_atom37_mask[protein_aatype, :]
-    protein[:atom37_atom_exists] = residx_atom37_mask
+    protein[:atom37_atom_exists] = permutedims(restype_atom37_mask[protein_aatype, :], (3, 1, 2))
 
     return protein
 end
@@ -93,16 +89,16 @@ function compute_predicted_aligned_error(
     boundaries = range(0f0, Float32(max_bin); length=no_bins - 1)
     boundaries = to_device(collect(boundaries), logits, Float32)
 
-    aligned_confidence_probs = NNlib.softmax(logits; dims=ndims(logits))
-    predicted_aligned_error, max_predicted_aligned_error = _calculate_expected_aligned_error(
-        boundaries,
-        aligned_confidence_probs,
-    )
+    aligned_confidence_probs = NNlib.softmax(logits; dims=1)
+    bin_centers = _calculate_bin_centers(boundaries)
+    bview = reshape(bin_centers, length(bin_centers), ntuple(_ -> 1, ndims(aligned_confidence_probs) - 1)...)
+    expected = sum(aligned_confidence_probs .* bview; dims=1)
+    expected = dropdims(expected; dims=1)
 
     return Dict(
         :aligned_confidence_probs => aligned_confidence_probs,
-        :predicted_aligned_error => predicted_aligned_error,
-        :max_predicted_aligned_error => max_predicted_aligned_error,
+        :predicted_aligned_error => expected,
+        :max_predicted_aligned_error => bin_centers[end],
     )
 end
 
@@ -116,7 +112,7 @@ function compute_tm(
     eps::Real = 1e-8,
 )
     if residue_weights === nothing
-        residue_weights = ones_like(logits, size(logits, ndims(logits) - 1))
+        residue_weights = ones_like(logits, size(logits, 2))
     end
 
     boundaries = range(0f0, Float32(max_bin); length=no_bins - 1)
@@ -126,11 +122,11 @@ function compute_tm(
     clipped_n = max(sum(residue_weights), 19)
     d0 = 1.24f0 * (clipped_n - 15)^(1f0 / 3f0) - 1.8f0
 
-    probs = NNlib.softmax(logits; dims=ndims(logits))
+    probs = NNlib.softmax(logits; dims=1)
     tm_per_bin = 1f0 ./ (1f0 .+ (bin_centers .^ 2) ./ (d0 ^ 2))
-    tm_view = reshape(tm_per_bin, ntuple(_ -> 1, ndims(probs) - 1)..., length(tm_per_bin))
-    predicted_tm_term = sum(probs .* tm_view; dims=ndims(probs))
-    predicted_tm_term = dropdims(predicted_tm_term; dims=ndims(predicted_tm_term))
+    tm_view = reshape(tm_per_bin, length(tm_per_bin), ntuple(_ -> 1, ndims(probs) - 1)...)
+    predicted_tm_term = sum(probs .* tm_view; dims=1)
+    predicted_tm_term = dropdims(predicted_tm_term; dims=1)
 
     n = size(predicted_tm_term, 1)
     pair_mask = ones_like(predicted_tm_term, Int, n, n)

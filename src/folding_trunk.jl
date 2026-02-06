@@ -1,13 +1,5 @@
 using NNlib
-
-function cross_last(a::AbstractArray, b::AbstractArray)
-    a1 = _view_last1(a, 1); a2 = _view_last1(a, 2); a3 = _view_last1(a, 3)
-    b1 = _view_last1(b, 1); b2 = _view_last1(b, 2); b3 = _view_last1(b, 3)
-    c1 = a2 .* b3 .- a3 .* b2
-    c2 = a3 .* b1 .- a1 .* b3
-    c3 = a1 .* b2 .- a2 .* b1
-    return cat(c1, c2, c3; dims=ndims(c1) + 1)
-end
+import Zygote
 
 struct FoldingTrunkConfig
     num_blocks::Int
@@ -54,20 +46,60 @@ function RelativePosition(bins::Int, pairwise_state_dim::Int)
 end
 
 function (m::RelativePosition)(residue_index::AbstractArray; mask=nothing)
-    diff = reshape(residue_index, size(residue_index, 1), 1, size(residue_index, 2)) .-
-           reshape(residue_index, size(residue_index, 1), size(residue_index, 2), 1)
+    # residue_index: (L, B)
+    diff = reshape(residue_index, 1, size(residue_index, 1), size(residue_index, 2)) .-
+           reshape(residue_index, size(residue_index, 1), 1, size(residue_index, 2))
     diff = clamp.(diff, -m.bins, m.bins)
     diff = diff .+ m.bins .+ 1
 
     if mask !== nothing
-        pair_mask = reshape(mask, size(mask, 1), 1, size(mask, 2)) .* reshape(mask, size(mask, 1), size(mask, 2), 1)
+        pair_mask = reshape(mask, size(mask, 1), 1, size(mask, 2)) .* reshape(mask, 1, size(mask, 1), size(mask, 2))
         diff = ifelse.(pair_mask .== 1, diff, 0)
     end
 
     diff = diff .+ 1 # shift to 1-based indexing for Flux.Embedding
     emb = m.embedding(diff)
-    # embedding returns (c_z, B, L, L); trunk expects (B, L, L, c_z)
-    return permutedims(emb, (2, 3, 4, 1))
+    # embedding returns (c_z, L, L, B)
+    return emb
+end
+
+function cross_first(a::AbstractArray, b::AbstractArray)
+    a1 = _view_first1(a, 1); a2 = _view_first1(a, 2); a3 = _view_first1(a, 3)
+    b1 = _view_first1(b, 1); b2 = _view_first1(b, 2); b3 = _view_first1(b, 3)
+    c1 = a2 .* b3 .- a3 .* b2
+    c2 = a3 .* b1 .- a1 .* b3
+    c3 = a1 .* b2 .- a2 .* b1
+    c1 = reshape(c1, 1, size(c1)...)
+    c2 = reshape(c2, 1, size(c2)...)
+    c3 = reshape(c3, 1, size(c3)...)
+    return cat(c1, c2, c3; dims=1)
+end
+
+function distogram(coords, min_bin::Real, max_bin::Real, num_bins::Int)
+    # coords: (3, 3, L, B) for N, CA, C
+    boundaries = range(Float32(min_bin), Float32(max_bin); length=num_bins - 1)
+    boundaries = collect(boundaries)
+    boundaries = to_device(boundaries, coords, Float32) .^ 2
+
+    N = view(coords, :, 1, :, :)
+    CA = view(coords, :, 2, :, :)
+    C = view(coords, :, 3, :, :)
+
+    b = CA .- N
+    c = C .- CA
+    a = cross_first(b, c)
+    CB = (-0.58273431f0 .* a) .+ (0.56802827f0 .* b) .- (0.54067466f0 .* c) .+ CA
+
+    diff = reshape(CB, 3, size(CB, 2), 1, size(CB, 3)) .-
+           reshape(CB, 3, 1, size(CB, 2), size(CB, 3))
+    dists = sum(diff .^ 2; dims=1)
+    dists = dropdims(dists; dims=1) # (L, L, B)
+
+    dists_exp = reshape(dists, size(dists)..., 1)
+    bview = reshape(boundaries, 1, 1, 1, :)
+    bins = sum(dists_exp .> bview; dims=4)
+    bins = dropdims(bins; dims=4)
+    return Int.(bins)
 end
 
 @concrete struct FoldingTrunk <: Onion.Layer
@@ -103,14 +135,14 @@ function FoldingTrunk(; cfg::FoldingTrunkConfig=FoldingTrunkConfig())
     ]
 
     recycle_bins = 15
-    recycle_s_norm = LayerNormLast(c_s)
-    recycle_z_norm = LayerNormLast(c_z)
+    recycle_s_norm = LayerNormFirst(c_s)
+    recycle_z_norm = LayerNormFirst(c_z)
     recycle_disto = Flux.Embedding(recycle_bins, c_z)
     recycle_disto.weight[:, 1] .= 0f0
 
     structure_module = StructureModule(cfg=cfg.structure_module)
-    trunk2sm_s = LinearLast(c_s, structure_module.cfg.c_s)
-    trunk2sm_z = LinearLast(c_z, structure_module.cfg.c_z)
+    trunk2sm_s = LinearFirst(c_s, structure_module.cfg.c_s)
+    trunk2sm_z = LinearFirst(c_z, structure_module.cfg.c_z)
 
     return FoldingTrunk(
         cfg,
@@ -160,8 +192,7 @@ function (m::FoldingTrunk)(
 
     recycle_s = zeros_like(s_s_0, size(s_s_0)...)
     recycle_z = zeros_like(s_z_0, size(s_z_0)...)
-    # recycle bins are per (B, L, L), not per channel
-    recycle_bins = zeros_like(s_z_0, Int, size(s_z_0)[1:3]...)
+    recycle_bins = zeros_like(s_z_0, Int, size(s_z_0, 2), size(s_z_0, 3), size(s_z_0, 4))
 
     s_s = s_s_0
     s_z = s_z_0
@@ -172,8 +203,7 @@ function (m::FoldingTrunk)(
     for _ in 1:no_recycles
         recycle_s = m.recycle_s_norm(recycle_s)
         recycle_z = m.recycle_z_norm(recycle_z)
-        # embedding returns (c_z, B, L, L) -> (B, L, L, c_z)
-        recycle_z = recycle_z .+ permutedims(m.recycle_disto(recycle_bins .+ 1), (2, 3, 4, 1))
+        recycle_z = recycle_z .+ m.recycle_disto(recycle_bins .+ 1)
 
         s_s, s_z = _trunk_iter(m, s_s_0 .+ recycle_s, s_z_0 .+ recycle_z, residx, mask)
 
@@ -186,36 +216,14 @@ function (m::FoldingTrunk)(
         recycle_s = s_s
         recycle_z = s_z
 
-        coords = structure[:positions][end, :, :, 1:3, :]
-        recycle_bins = distogram(coords, 3.375f0, 21.375f0, m.recycle_bins)
+        coords = structure[:positions][end, :, 1:3, :, :]
+        recycle_bins = Zygote.ignore() do
+            distogram(coords, 3.375f0, 21.375f0, m.recycle_bins)
+        end
     end
 
     structure === nothing && error("FoldingTrunk: no recycle iterations ran.")
     structure[:s_s] = s_s
     structure[:s_z] = s_z
     return structure
-end
-
-function distogram(coords, min_bin::Real, max_bin::Real, num_bins::Int)
-    boundaries = range(Float32(min_bin), Float32(max_bin); length=num_bins - 1)
-    boundaries = collect(boundaries)
-    boundaries = to_device(boundaries, coords, Float32) .^ 2
-
-    N = coords[:, :, 1, :]
-    CA = coords[:, :, 2, :]
-    C = coords[:, :, 3, :]
-
-    b = CA .- N
-    c = C .- CA
-    a = cross_last(b, c)
-    CB = (-0.58273431f0 .* a) .+ (0.56802827f0 .* b) .- (0.54067466f0 .* c) .+ CA
-
-    diff = reshape(CB, size(CB, 1), 1, size(CB, 2), size(CB, 3)) .-
-           reshape(CB, size(CB, 1), size(CB, 2), 1, size(CB, 3))
-    dists = sum(diff .^ 2; dims=4)
-
-    bview = reshape(boundaries, 1, 1, 1, :)
-    bins = sum(dists .> bview; dims=4)
-    bins = dropdims(bins; dims=4)
-    return Int.(bins)
 end

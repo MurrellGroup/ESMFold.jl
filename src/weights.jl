@@ -141,12 +141,12 @@ function load_esmfold_safetensors!(model::ESMFoldEmbed, path::AbstractString)
     return load_esmfold_safetensors!(model, reader)
 end
 
-function _load_layernorm_last!(reader::SafeTensors.Reader, prefix::String, ln::LayerNormLast)
+function _load_layernorm!(reader::SafeTensors.Reader, prefix::String, ln::LayerNormFirst)
     SafeTensors.read_into!(reader, "$prefix.weight", ln.w)
     SafeTensors.read_into!(reader, "$prefix.bias", ln.b)
 end
 
-function _load_linear_last!(reader::SafeTensors.Reader, prefix::String, lin::LinearLast)
+function _load_linear!(reader::SafeTensors.Reader, prefix::String, lin::LinearFirst)
     SafeTensors.read_into!(reader, "$prefix.weight", lin.weight)
     if lin.use_bias
         SafeTensors.read_into!(reader, "$prefix.bias", lin.bias)
@@ -158,70 +158,70 @@ function _load_embedding_weight!(reader::SafeTensors.Reader, name::String, emb)
 end
 
 function _load_residue_mlp!(reader::SafeTensors.Reader, prefix::String, mlp::ResidueMLP)
-    _load_layernorm_last!(reader, "$prefix.mlp.0", mlp.norm)
-    _load_linear_last!(reader, "$prefix.mlp.1", mlp.fc1)
-    _load_linear_last!(reader, "$prefix.mlp.3", mlp.fc2)
+    _load_layernorm!(reader, "$prefix.mlp.0", mlp.norm)
+    _load_linear!(reader, "$prefix.mlp.1", mlp.fc1)
+    _load_linear!(reader, "$prefix.mlp.3", mlp.fc2)
 end
 
 function _load_triangle_mul!(reader::SafeTensors.Reader, prefix::String, mul::TriangleMultiplicativeUpdate)
-    _load_layernorm_last!(reader, "$prefix.layer_norm_in", mul.layer_norm_in)
-    _load_layernorm_last!(reader, "$prefix.layer_norm_out", mul.layer_norm_out)
-    _load_linear_last!(reader, "$prefix.linear_a_p", mul.linear_a_p)
-    _load_linear_last!(reader, "$prefix.linear_a_g", mul.linear_a_g)
-    _load_linear_last!(reader, "$prefix.linear_b_p", mul.linear_b_p)
-    _load_linear_last!(reader, "$prefix.linear_b_g", mul.linear_b_g)
-    _load_linear_last!(reader, "$prefix.linear_g", mul.linear_g)
-    _load_linear_last!(reader, "$prefix.linear_z", mul.linear_z)
+    _load_layernorm!(reader, "$prefix.layer_norm_in", mul.layer_norm_in)
+    _load_layernorm!(reader, "$prefix.layer_norm_out", mul.layer_norm_out)
+    _load_linear!(reader, "$prefix.linear_a_p", mul.linear_a_p)
+    _load_linear!(reader, "$prefix.linear_a_g", mul.linear_a_g)
+    _load_linear!(reader, "$prefix.linear_b_p", mul.linear_b_p)
+    _load_linear!(reader, "$prefix.linear_b_g", mul.linear_b_g)
+    _load_linear!(reader, "$prefix.linear_g", mul.linear_g)
+    _load_linear!(reader, "$prefix.linear_z", mul.linear_z)
 end
 
 function _load_of_mha!(reader::SafeTensors.Reader, prefix::String, mha::OFMultiheadAttention)
-    _load_linear_last!(reader, "$prefix.linear_q", mha.linear_q)
-    _load_linear_last!(reader, "$prefix.linear_k", mha.linear_k)
-    _load_linear_last!(reader, "$prefix.linear_v", mha.linear_v)
-    _load_linear_last!(reader, "$prefix.linear_o", mha.linear_o)
-    mha.linear_g !== nothing && _load_linear_last!(reader, "$prefix.linear_g", mha.linear_g)
+    _load_linear!(reader, "$prefix.linear_q", mha.linear_q)
+    _load_linear!(reader, "$prefix.linear_k", mha.linear_k)
+    _load_linear!(reader, "$prefix.linear_v", mha.linear_v)
+    _load_linear!(reader, "$prefix.linear_o", mha.linear_o)
+    mha.linear_g !== nothing && _load_linear!(reader, "$prefix.linear_g", mha.linear_g)
 end
 
 function _load_triangle_attention!(reader::SafeTensors.Reader, prefix::String, attn::TriangleAttention)
-    _load_layernorm_last!(reader, "$prefix.layer_norm", attn.layer_norm)
-    _load_linear_last!(reader, "$prefix.linear", attn.linear)
+    _load_layernorm!(reader, "$prefix.layer_norm", attn.layer_norm)
+    _load_linear!(reader, "$prefix.linear", attn.linear)
     _load_of_mha!(reader, "$prefix.mha", attn.mha)
 end
 
 function _load_structure_module!(reader::SafeTensors.Reader, prefix::String, sm::StructureModule)
-    _load_layernorm_last!(reader, "$prefix.layer_norm_s", sm.layer_norm_s)
-    _load_layernorm_last!(reader, "$prefix.layer_norm_z", sm.layer_norm_z)
-    _load_linear_last!(reader, "$prefix.linear_in", sm.linear_in)
+    _load_layernorm!(reader, "$prefix.layer_norm_s", sm.layer_norm_s)
+    _load_layernorm!(reader, "$prefix.layer_norm_z", sm.layer_norm_z)
+    _load_linear!(reader, "$prefix.linear_in", sm.linear_in)
 
     ipa = sm.ipa
-    _load_linear_last!(reader, "$prefix.ipa.linear_q", ipa.linear_q)
-    _load_linear_last!(reader, "$prefix.ipa.linear_q_points", ipa.linear_q_points.linear)
-    _load_linear_last!(reader, "$prefix.ipa.linear_kv", ipa.linear_kv)
-    _load_linear_last!(reader, "$prefix.ipa.linear_kv_points", ipa.linear_kv_points.linear)
-    _load_linear_last!(reader, "$prefix.ipa.linear_b", ipa.linear_b)
-    _load_linear_last!(reader, "$prefix.ipa.linear_out", ipa.linear_out)
+    _load_linear!(reader, "$prefix.ipa.linear_q", ipa.linear_q)
+    _load_linear!(reader, "$prefix.ipa.linear_q_points", ipa.linear_q_points.linear)
+    _load_linear!(reader, "$prefix.ipa.linear_kv", ipa.linear_kv)
+    _load_linear!(reader, "$prefix.ipa.linear_kv_points", ipa.linear_kv_points.linear)
+    _load_linear!(reader, "$prefix.ipa.linear_b", ipa.linear_b)
+    _load_linear!(reader, "$prefix.ipa.linear_out", ipa.linear_out)
     SafeTensors.read_into!(reader, "$prefix.ipa.head_weights", ipa.head_weights)
 
-    _load_layernorm_last!(reader, "$prefix.layer_norm_ipa", sm.layer_norm_ipa)
+    _load_layernorm!(reader, "$prefix.layer_norm_ipa", sm.layer_norm_ipa)
 
-    _load_layernorm_last!(reader, "$prefix.transition.layer_norm", sm.transition.layer_norm)
+    _load_layernorm!(reader, "$prefix.transition.layer_norm", sm.transition.layer_norm)
     for (i, layer) in enumerate(sm.transition.layers)
         lp = "$prefix.transition.layers.$(i - 1)"
-        _load_linear_last!(reader, "$lp.linear_1", layer.linear_1)
-        _load_linear_last!(reader, "$lp.linear_2", layer.linear_2)
-        _load_linear_last!(reader, "$lp.linear_3", layer.linear_3)
+        _load_linear!(reader, "$lp.linear_1", layer.linear_1)
+        _load_linear!(reader, "$lp.linear_2", layer.linear_2)
+        _load_linear!(reader, "$lp.linear_3", layer.linear_3)
     end
 
-    _load_linear_last!(reader, "$prefix.bb_update.linear", sm.bb_update.linear)
+    _load_linear!(reader, "$prefix.bb_update.linear", sm.bb_update.linear)
 
     ar = sm.angle_resnet
-    _load_linear_last!(reader, "$prefix.angle_resnet.linear_in", ar.linear_in)
-    _load_linear_last!(reader, "$prefix.angle_resnet.linear_initial", ar.linear_initial)
-    _load_linear_last!(reader, "$prefix.angle_resnet.linear_out", ar.linear_out)
+    _load_linear!(reader, "$prefix.angle_resnet.linear_in", ar.linear_in)
+    _load_linear!(reader, "$prefix.angle_resnet.linear_initial", ar.linear_initial)
+    _load_linear!(reader, "$prefix.angle_resnet.linear_out", ar.linear_out)
     for (i, layer) in enumerate(ar.layers)
         lp = "$prefix.angle_resnet.layers.$(i - 1)"
-        _load_linear_last!(reader, "$lp.linear_1", layer.linear_1)
-        _load_linear_last!(reader, "$lp.linear_2", layer.linear_2)
+        _load_linear!(reader, "$lp.linear_1", layer.linear_1)
+        _load_linear!(reader, "$lp.linear_2", layer.linear_2)
     end
 end
 
@@ -230,27 +230,27 @@ function load_esmfold_safetensors!(model::ESMFoldModel, reader::SafeTensors.Read
 
     _load_embedding_weight!(reader, "trunk.pairwise_positional_embedding.embedding.weight", model.trunk.pairwise_positional_embedding.embedding)
 
-    _load_layernorm_last!(reader, "trunk.recycle_s_norm", model.trunk.recycle_s_norm)
-    _load_layernorm_last!(reader, "trunk.recycle_z_norm", model.trunk.recycle_z_norm)
+    _load_layernorm!(reader, "trunk.recycle_s_norm", model.trunk.recycle_s_norm)
+    _load_layernorm!(reader, "trunk.recycle_z_norm", model.trunk.recycle_z_norm)
     permutedims!(model.trunk.recycle_disto.weight, SafeTensors.read_tensor(reader, "trunk.recycle_disto.weight"), (2, 1))
 
-    _load_linear_last!(reader, "trunk.trunk2sm_s", model.trunk.trunk2sm_s)
-    _load_linear_last!(reader, "trunk.trunk2sm_z", model.trunk.trunk2sm_z)
+    _load_linear!(reader, "trunk.trunk2sm_s", model.trunk.trunk2sm_s)
+    _load_linear!(reader, "trunk.trunk2sm_z", model.trunk.trunk2sm_z)
 
     for (i, block) in enumerate(model.trunk.blocks)
         prefix = "trunk.blocks.$(i - 1)"
-        _load_layernorm_last!(reader, "$prefix.layernorm_1", block.layernorm_1)
+        _load_layernorm!(reader, "$prefix.layernorm_1", block.layernorm_1)
 
-        _load_layernorm_last!(reader, "$prefix.sequence_to_pair.layernorm", block.sequence_to_pair.layernorm)
-        _load_linear_last!(reader, "$prefix.sequence_to_pair.proj", block.sequence_to_pair.proj)
-        _load_linear_last!(reader, "$prefix.sequence_to_pair.o_proj", block.sequence_to_pair.o_proj)
+        _load_layernorm!(reader, "$prefix.sequence_to_pair.layernorm", block.sequence_to_pair.layernorm)
+        _load_linear!(reader, "$prefix.sequence_to_pair.proj", block.sequence_to_pair.proj)
+        _load_linear!(reader, "$prefix.sequence_to_pair.o_proj", block.sequence_to_pair.o_proj)
 
-        _load_layernorm_last!(reader, "$prefix.pair_to_sequence.layernorm", block.pair_to_sequence.layernorm)
-        _load_linear_last!(reader, "$prefix.pair_to_sequence.linear", block.pair_to_sequence.linear)
+        _load_layernorm!(reader, "$prefix.pair_to_sequence.layernorm", block.pair_to_sequence.layernorm)
+        _load_linear!(reader, "$prefix.pair_to_sequence.linear", block.pair_to_sequence.linear)
 
-        _load_linear_last!(reader, "$prefix.seq_attention.proj", block.seq_attention.proj)
-        _load_linear_last!(reader, "$prefix.seq_attention.o_proj", block.seq_attention.o_proj)
-        block.seq_attention.g_proj !== nothing && _load_linear_last!(reader, "$prefix.seq_attention.g_proj", block.seq_attention.g_proj)
+        _load_linear!(reader, "$prefix.seq_attention.proj", block.seq_attention.proj)
+        _load_linear!(reader, "$prefix.seq_attention.o_proj", block.seq_attention.o_proj)
+        block.seq_attention.g_proj !== nothing && _load_linear!(reader, "$prefix.seq_attention.g_proj", block.seq_attention.g_proj)
 
         _load_triangle_mul!(reader, "$prefix.tri_mul_out", block.tri_mul_out.inner)
         _load_triangle_mul!(reader, "$prefix.tri_mul_in", block.tri_mul_in.inner)
@@ -264,14 +264,14 @@ function load_esmfold_safetensors!(model::ESMFoldModel, reader::SafeTensors.Read
 
     _load_structure_module!(reader, "trunk.structure_module", model.trunk.structure_module)
 
-    _load_linear_last!(reader, "distogram_head", model.distogram_head)
-    _load_linear_last!(reader, "ptm_head", model.ptm_head)
-    _load_linear_last!(reader, "lm_head", model.lm_head)
+    _load_linear!(reader, "distogram_head", model.distogram_head)
+    _load_linear!(reader, "ptm_head", model.ptm_head)
+    _load_linear!(reader, "lm_head", model.lm_head)
 
-    _load_layernorm_last!(reader, "lddt_head.0", model.lddt_head.norm)
-    _load_linear_last!(reader, "lddt_head.1", model.lddt_head.linear_1)
-    _load_linear_last!(reader, "lddt_head.2", model.lddt_head.linear_2)
-    _load_linear_last!(reader, "lddt_head.3", model.lddt_head.linear_3)
+    _load_layernorm!(reader, "lddt_head.0", model.lddt_head.norm)
+    _load_linear!(reader, "lddt_head.1", model.lddt_head.linear_1)
+    _load_linear!(reader, "lddt_head.2", model.lddt_head.linear_2)
+    _load_linear!(reader, "lddt_head.3", model.lddt_head.linear_3)
 
     return model
 end
