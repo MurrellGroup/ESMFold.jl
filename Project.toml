@@ -1,7 +1,7 @@
 name = "ESMFold"
 uuid = "992ade7d-a23b-44e1-bfa9-f18d3a6e7567"
-authors = ["Ben Murrell"]
 version = "1.0.0-DEV"
+authors = ["Ben Murrell"]
 
 [deps]
 BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
@@ -23,6 +23,7 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 BFloat16s = "0.5, 0.6"
+BatchedTransformations = "0.5"
 ChainRulesCore = "1.26.0"
 Einops = "0.1.14"
 Flux = "0.16.9"
