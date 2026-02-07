@@ -12,9 +12,8 @@ using HuggingFaceApi
 include("device_utils.jl")
 include("safetensors.jl")
 
-# GPU optimization support
+# GPU support
 using CUDA
-using OnionTile
 
 # Import set_chunk_size! for extension on ESMFoldModel
 import Onion: set_chunk_size!
