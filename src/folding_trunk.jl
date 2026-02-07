@@ -166,8 +166,18 @@ end
 
 function _trunk_iter(m::FoldingTrunk, s, z, residx, mask)
     z = z .+ m.pairwise_positional_embedding(residx, mask=mask)
+    # For all-ones mask (common batch=1 case), pass nothing to skip mask overhead
+    block_mask = mask
+    if mask !== nothing
+        # Check once (one GPU→CPU sync, amortized over 48 blocks)
+        mask_total = sum(mask)
+        mask_sum = mask_total isa AbstractArray ? Int(Array(mask_total)[]) : Int(mask_total)
+        if mask_sum == length(mask)
+            block_mask = nothing
+        end
+    end
     for block in m.blocks
-        s, z = block(s, z; mask=mask, residue_index=residx, chunk_size=m.chunk_size)
+        s, z = block(s, z; mask=block_mask, residue_index=residx, chunk_size=m.chunk_size)
     end
     return s, z
 end

@@ -79,22 +79,68 @@ function (m::ESMMultiheadAttention)(
     value::AbstractArray = key;
     key_padding_mask = nothing,
     need_head_weights::Bool = false,
+    _precomputed_attn_bias = nothing,
 )
-    # Inputs are (C, T, B)
+    # Inputs are (C, T, B) where C = head_dim * num_heads
+    D = m.head_dim
+    H = m.num_heads
+    C = D * H
+    T = size(query, 2)
+    B = size(query, 3)
+
+    # CUDA fast path: fused rotary + flash attention, work in 4D throughout
+    if isa(query, CuArray) && !need_head_weights
+        # Q, K, V projections (3 matmuls)
+        q = m.q_proj(query)
+        k = m.k_proj(key)
+        v = m.v_proj(value)
+
+        # Reshape to 4D: (C, T, B) → (D, H, T, B) → permutedims → (D, T, H, B)
+        q4 = permutedims(reshape(q, D, H, T, B), (1, 3, 2, 4))
+        k4 = permutedims(reshape(k, D, H, T, B), (1, 3, 2, 4))
+        v4 = permutedims(reshape(v, D, H, T, B), (1, 3, 2, 4))
+
+        # Fused rotary embedding (2 GPU kernels per call instead of ~5)
+        if m.rot_emb !== nothing
+            _, seq_len, _ = size(k4[:, :, 1, 1:1])  # get seq_len
+            cos, sin = _update_cos_sin!(m.rot_emb, T, k4)
+            q4 = apply_rotary_pos_emb_fused(q4, cos, sin)
+            k4 = apply_rotary_pos_emb_fused(k4, cos, sin)
+        end
+
+        # Flash attention — scaling folded in (no separate q .* scaling broadcast)
+        if _precomputed_attn_bias !== nothing
+            out4 = flash_attention_bias(q4, k4, v4, _precomputed_attn_bias; scale=m.scaling)
+        elseif key_padding_mask !== nothing
+            s = size(key_padding_mask, 2)
+            mask_col = permutedims(key_padding_mask, (2, 1))
+            pad_bias = ifelse.(mask_col, Float32(-Inf), 0f0)
+            pad_bias_4d = reshape(pad_bias, s, 1, 1, B)
+            pad_bias_full = repeat(pad_bias_4d, 1, T, H, 1)
+            out4 = flash_attention_bias(q4, k4, v4, pad_bias_full; scale=m.scaling)
+        else
+            out4 = flash_attention(q4, k4, v4; scale=m.scaling)
+        end
+
+        # Back to (C, T, B): (D, T, H, B) → permutedims → (D, H, T, B) → reshape
+        attn = reshape(permutedims(out4, (1, 3, 2, 4)), C, T, B)
+        attn = m.out_proj(attn)
+        return attn, nothing
+    end
+
+    # CPU fallback: standard path with separate scaling and batched_mul
     q = m.q_proj(query)
     k = m.k_proj(key)
     v = m.v_proj(value)
-
     q = q .* m.scaling
-
-    q = _reshape_heads(q, m.head_dim, m.num_heads)
-    k = _reshape_heads(k, m.head_dim, m.num_heads)
-    v = _reshape_heads(v, m.head_dim, m.num_heads)
-
+    q = _reshape_heads(q, D, H)
+    k = _reshape_heads(k, D, H)
+    v = _reshape_heads(v, D, H)
     if m.rot_emb !== nothing
         q, k = (m.rot_emb)(q, k)
     end
 
+    # Fallback: standard batched_mul path
     # attn_weights: (T, S, B*H)
     attn_weights = NNlib.batched_mul(permutedims(q, (2, 1, 3)), k)
     _apply_key_padding_mask!(attn_weights, key_padding_mask)

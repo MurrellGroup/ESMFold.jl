@@ -26,38 +26,80 @@ end
 function (m::ESMFoldAttention)(x::AbstractArray; mask=nothing, bias=nothing)
     # x: (C, L, B)
     t = m.proj(x)
-    # Split feature dim in head-major order like PyTorch (per-head qkv).
-    # After reshape: (head_width, 3, num_heads, L, B)
-    t = reshape(t, m.head_width, 3, m.num_heads, size(t, 2), size(t, 3))
-    # Permute to (B, H, L, 3, head_width)
-    t = permutedims(t, (5, 3, 4, 2, 1))
+    D = m.head_width
+    H = m.num_heads
+    L = size(t, 2)
+    B = size(t, 3)
+    # Reshape to (head_width, 3, num_heads, L, B)
+    t = reshape(t, D, 3, H, L, B)
+
+    # Fast CUDA path: extract q/k/v directly into flash attention format (D, L, H, B)
+    if isa(t, CuArray)
+        qkv_shape = (D, L, H, B)
+        q4 = _get_perm_buf(20, qkv_shape)
+        k4 = _get_perm_buf(21, qkv_shape)
+        v4 = _get_perm_buf(22, qkv_shape)
+        permutedims!(q4, @view(t[:, 1, :, :, :]), (1, 3, 2, 4))  # (D, L, H, B)
+        permutedims!(k4, @view(t[:, 2, :, :, :]), (1, 3, 2, 4))
+        permutedims!(v4, @view(t[:, 3, :, :, :]), (1, 3, 2, 4))
+        CUDA.unsafe_free!(t)  # ~6MB freed (D*3*H*L*B)
+
+        # Build bias for flash attention: need (K, Q, H, B) format
+        bias4 = nothing
+        if bias !== nothing
+            bias4 = permutedims(bias, (3, 2, 1, 4))
+        end
+        if mask !== nothing
+            mask_bias = reshape(ifelse.(mask .== 1, 0f0, Float32(-Inf)), L, 1, 1, B)
+            if bias4 !== nothing
+                bias4 = bias4 .+ mask_bias
+            else
+                bias4 = repeat(mask_bias, 1, L, H, 1)
+            end
+        end
+
+        flash_out = _get_perm_buf(23, qkv_shape)
+        if bias4 !== nothing
+            flash_attention_bias(q4, k4, v4, bias4; scale=m.rescale_factor, output=flash_out)
+        else
+            flash_attention(q4, k4, v4; scale=m.rescale_factor, output=flash_out)
+        end
+
+        # Output: (D, L, H, B) → (D, H, L, B) → reshape to (C, L, B)
+        out_perm = _get_perm_buf(24, (D, H, L, B))
+        permutedims!(out_perm, flash_out, (1, 3, 2, 4))
+        o = reshape(out_perm, D * H, L, B)
+
+        if m.gated
+            g_raw = m.g_proj(x)
+            @. o = NNlib.sigmoid(g_raw) * o
+            CUDA.unsafe_free!(g_raw)  # free gating projection immediately
+        end
+
+        o_result = m.o_proj(o)
+        return o_result, nothing
+    end
+
+    # CPU fallback: standard batched_mul path
+    t = permutedims(t, (5, 3, 4, 2, 1))  # (B, H, L, 3, D)
     q = view(t, :, :, :, 1, :)
     k = view(t, :, :, :, 2, :)
     v = view(t, :, :, :, 3, :)
     q = q .* m.rescale_factor
 
-    B = size(q, 1)
-    H = size(q, 2)
-    L = size(q, 3)
-    D = size(q, 4)
-
-    # flatten batch*head for batched matmul: (L, D, B*H)
     q3 = permutedims(reshape(q, B * H, L, D), (2, 3, 1))
     k3 = permutedims(reshape(k, B * H, L, D), (2, 3, 1))
     v3 = permutedims(reshape(v, B * H, L, D), (2, 3, 1))
 
-    # attention logits: (L, L, B*H)
     a = NNlib.batched_mul(q3, permutedims(k3, (2, 1, 3)))
 
     if bias !== nothing
-        # bias: (H, L, L, B) -> (L, L, B*H)
         bias_h = permutedims(bias, (2, 3, 4, 1))
         b3 = reshape(bias_h, size(bias_h, 1), size(bias_h, 2), :)
         a = a .+ b3
     end
 
     if mask !== nothing
-        # mask: (L, B) -> expand to (B, H, Lq, Lk), masking keys only
         mask_b = permutedims(mask, (2, 1))
         mask_k = reshape(mask_b, B, 1, 1, L)
         mask_k = repeat(mask_k, 1, H, L, 1)
@@ -69,10 +111,8 @@ function (m::ESMFoldAttention)(x::AbstractArray; mask=nothing, bias=nothing)
     end
 
     a = NNlib.softmax(a; dims=2)
-
-    # output: (L, D, B*H)
     o = NNlib.batched_mul(a, v3)
-    # reshape back to (D, H, L, B) then flatten heads
+
     o = reshape(o, L, D, B, H)
     o = permutedims(o, (2, 4, 1, 3))
     o = reshape(o, D * H, L, B)
@@ -82,8 +122,7 @@ function (m::ESMFoldAttention)(x::AbstractArray; mask=nothing, bias=nothing)
         o = g .* o
     end
 
-    y = m.o_proj(o)
-    return y, nothing
+    return m.o_proj(o), nothing
 end
 
 # Training-mode toggle for dropout-like layers.
@@ -134,16 +173,31 @@ end
 
 function (m::SequenceToPair)(sequence_state)
     # sequence_state: (C_s, L, B)
-    s = m.layernorm(sequence_state)
-    s = m.proj(s)
+    s_norm = m.layernorm(sequence_state)
+    s = m.proj(s_norm)
+    isa(s_norm, CuArray) && CUDA.unsafe_free!(s_norm)  # free LayerNorm output
     inner_dim = size(s, 1) ÷ 2
     q = view(s, 1:inner_dim, :, :)
     k = view(s, (inner_dim + 1):(2 * inner_dim), :, :)
-    q_exp = reshape(q, inner_dim, 1, size(q, 2), size(q, 3))
-    k_exp = reshape(k, inner_dim, size(k, 2), 1, size(k, 3))
-    prod = q_exp .* k_exp
-    diff = q_exp .- k_exp
-    x = cat(prod, diff; dims=1)
+    L = size(q, 2)
+    B = size(q, 3)
+    q_exp = reshape(q, inner_dim, 1, L, B)
+    k_exp = reshape(k, inner_dim, L, 1, B)
+
+    if isa(s, CuArray)
+        # Pre-allocated outer product buffer (avoids ~8.5MB allocation per call)
+        x = _get_perm_buf(30, (2 * inner_dim, L, L, B))
+        prod_view = @view x[1:inner_dim, :, :, :]
+        diff_view = @view x[inner_dim+1:end, :, :, :]
+        @. prod_view = q_exp * k_exp
+        @. diff_view = q_exp - k_exp
+        CUDA.unsafe_free!(s)  # free proj output after outer product
+    else
+        prod = q_exp .* k_exp
+        diff = q_exp .- k_exp
+        x = cat(prod, diff; dims=1)
+    end
+
     x = m.o_proj(x)
     return x
 end
@@ -164,7 +218,9 @@ end
 function (m::PairToSequence)(pairwise_state)
     # pairwise_state: (C_z, L, L, B)
     z = m.layernorm(pairwise_state)
-    return m.linear(z)
+    result = m.linear(z)
+    isa(z, CuArray) && CUDA.unsafe_free!(z)  # free LayerNorm output
+    return result
 end
 
 @concrete struct ResidueMLP <: Onion.Layer
@@ -186,9 +242,24 @@ end
 
 function (m::ResidueMLP)(x)
     y = m.norm(x)
-    y = max.(m.fc1(y), 0f0)
+    norm_out = y  # keep reference for freeing
+    y = m.fc1(y)
+    if isa(x, CuArray)
+        CUDA.unsafe_free!(norm_out)  # free LayerNorm output after fc1 consumed it
+    end
+    y .= max.(y, 0f0)  # in-place ReLU: reuse fc1's output buffer (~47MB saved for mlp_pair)
+    fc1_out = y  # keep reference for freeing
     y = m.fc2(y)
+    if isa(x, CuArray)
+        CUDA.unsafe_free!(fc1_out)  # free fc1 output after fc2 consumed it
+    end
     y = m.dropout(y)
+    # In-place residual addition on CUDA to avoid allocating a new array
+    if isa(x, CuArray)
+        x .+= y
+        CUDA.unsafe_free!(y)  # free fc2 output after addition
+        return x
+    end
     return x .+ y
 end
 

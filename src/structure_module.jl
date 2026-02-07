@@ -268,9 +268,15 @@ end
 
 function (m::StructureModuleTransitionLayer)(s)
     s0 = s
-    s = max.(m.linear_1(s), 0f0)
-    s = max.(m.linear_2(s), 0f0)
+    s = m.linear_1(s)
+    s .= max.(s, 0f0)  # in-place ReLU
+    s = m.linear_2(s)
+    s .= max.(s, 0f0)  # in-place ReLU
     s = m.linear_3(s)
+    if isa(s, CuArray)
+        s .+= s0
+        return s
+    end
     return s .+ s0
 end
 
@@ -313,10 +319,12 @@ end
 
 function (m::AngleResnetBlock)(a)
     s = a
-    a = max.(a, 0f0)
-    a = m.linear_1(a)
-    a = max.(a, 0f0)
-    a = m.linear_2(a)
+    a = m.linear_1(max.(a, 0f0))
+    a = m.linear_2(max.(a, 0f0))
+    if isa(a, CuArray)
+        a .+= s
+        return a
+    end
     return a .+ s
 end
 
@@ -446,7 +454,11 @@ function (m::StructureModule)(evoformer_output_dict, aatype, mask=nothing)
 
     outputs = Zygote.Buffer(Vector{Dict{Symbol,Any}}(undef, m.cfg.no_blocks))
     for i in 1:m.cfg.no_blocks
-        s = s .+ m.ipa(s, z, rigids, mask)
+        if isa(s, CuArray)
+            s .+= m.ipa(s, z, rigids, mask)
+        else
+            s = s .+ m.ipa(s, z, rigids, mask)
+        end
         s = m.ipa_dropout(s)
         s = m.layer_norm_ipa(s)
         s = m.transition(s)

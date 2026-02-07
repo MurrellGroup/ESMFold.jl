@@ -29,7 +29,8 @@ function RobertaLMHead(embed_dim::Int, output_dim::Int, weight)
 end
 
 function gelu(x)
-    return 0.5f0 .* x .* (1 .+ erf.(x ./ sqrt(2f0)))
+    # Use NNlib's fused GELU for better GPU performance
+    return NNlib.gelu.(x)
 end
 
 @concrete struct TransformerLayer <: Onion.Layer
@@ -64,6 +65,7 @@ function (layer::TransformerLayer)(
     x;
     self_attn_padding_mask = nothing,
     need_head_weights::Bool = false,
+    _precomputed_attn_bias = nothing,
 )
     residual = x
     x = layer.self_attn_layer_norm(x)
@@ -71,7 +73,23 @@ function (layer::TransformerLayer)(
         x;
         key_padding_mask = self_attn_padding_mask,
         need_head_weights = need_head_weights,
+        _precomputed_attn_bias = _precomputed_attn_bias,
     )
+
+    # In-place residual additions on CUDA to avoid allocating new arrays
+    if isa(residual, CuArray)
+        residual .+= attn_out
+        x = residual
+
+        residual = x
+        x = layer.final_layer_norm(x)
+        x = layer.fc1(x)
+        @. x = NNlib.gelu(x)  # in-place GELU
+        x = layer.fc2(x)
+        residual .+= x
+        return residual, attn_weights
+    end
+
     x = residual .+ attn_out
 
     residual = x
@@ -182,11 +200,25 @@ function (model::ESM2)(
 
     padding_mask_for_attn = any(padding_mask) ? padding_mask : nothing
 
+    # Pre-compute the attention bias once for all 33 layers (saves ~130 kernel launches)
+    precomputed_attn_bias = nothing
+    if padding_mask_for_attn !== nothing && isa(x, CuArray)
+        head_dim = model.embed_dim ÷ model.attention_heads
+        seq_len = size(x, 2)
+        batch = size(x, 3)
+        s = size(padding_mask_for_attn, 2)
+        mask_col = permutedims(padding_mask_for_attn, (2, 1))
+        pad_bias = ifelse.(mask_col, Float32(-Inf), 0f0)
+        pad_bias_4d = reshape(pad_bias, s, 1, 1, batch)
+        precomputed_attn_bias = repeat(pad_bias_4d, 1, seq_len, model.attention_heads, 1)
+    end
+
     for layer_idx in 1:model.num_layers
         x, attn_weights = model.layers[layer_idx](
             x;
             self_attn_padding_mask = padding_mask_for_attn,
             need_head_weights = need_head_weights,
+            _precomputed_attn_bias = precomputed_attn_bias,
         )
         if layer_idx in repr_set
             hidden_representations[layer_idx] = permutedims(x, (3, 2, 1))

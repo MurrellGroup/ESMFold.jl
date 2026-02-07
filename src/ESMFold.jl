@@ -15,6 +15,11 @@ using HuggingFaceApi
 include("device_utils.jl")
 include("safetensors.jl")
 
+# GPU optimization support
+using CUDA
+import cuTile as ct
+import cuTENSOR
+
 export Alphabet, RestypeTable, Alphabet_from_architecture
 export ESM2Config, ESM2
 export ESMFoldEmbedConfig, ESMFoldEmbed
@@ -48,5 +53,6 @@ include("openfold_infer_utils.jl")
 include("protein.jl")
 include("esmfold_full.jl")
 include("weights.jl")
+include("cuda_kernels.jl")
 
 end
