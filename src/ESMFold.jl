@@ -16,6 +16,9 @@ include("safetensors.jl")
 using CUDA
 using OnionTile
 
+# Import set_chunk_size! for extension on ESMFoldModel
+import Onion: set_chunk_size!
+
 # Import all protein layer types and utilities from Onion
 using Onion: LayerNormFirst, LinearFirst, layernorm_inplace!,
     AbstractRotation, RotMatRotation, QuatRotation, Rigid,
