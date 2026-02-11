@@ -64,12 +64,12 @@ function ESMFoldModel(
     )
     trunk = FoldingTrunk(cfg=cfg.trunk)
 
-    distogram_bins = 64
+    distogram_bins = DISTOGRAM_BINS
     distogram_head = LinearFirst(c_z, distogram_bins)
     ptm_head = LinearFirst(c_z, distogram_bins)
     lm_head = LinearFirst(c_s, embed.n_tokens_embed)
-    lddt_bins = 50
-    lddt_head = ESMFoldLDDTHead(cfg.trunk.structure_module.c_s, cfg.lddt_head_hid_dim, 37 * lddt_bins)
+    lddt_bins = LDDT_BINS
+    lddt_head = ESMFoldLDDTHead(cfg.trunk.structure_module.c_s, cfg.lddt_head_hid_dim, NUM_ATOM_TYPES * lddt_bins)
 
     return ESMFoldModel(
         cfg,

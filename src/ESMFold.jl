@@ -11,6 +11,7 @@ using HuggingFaceApi
 
 include("device_utils.jl")
 include("safetensors.jl")
+include("constants.jl")
 
 # GPU support
 using CUDA
@@ -78,13 +79,20 @@ export confidence_metrics
 export set_training!, is_training
 export make_atom14_masks!
 export compute_tm, compute_predicted_aligned_error, categorical_lddt
+export DISTOGRAM_BINS, LDDT_BINS, NUM_ATOM_TYPES, RECYCLE_DISTANCE_BINS
+export esm2_forward_ad
+export prepare_inputs, run_esm2, run_embedding
+export run_trunk, run_trunk_single_pass
+export run_structure_module, run_heads, run_pipeline
 
 include("alphabet.jl")
 include("esm2.jl")
+include("esm2_ad.jl")
 include("esmfold_embed.jl")
 include("openfold_infer_utils.jl")
 include("protein.jl")
 include("esmfold_full.jl")
+include("pipeline.jl")
 include("weights.jl")
 
 end
