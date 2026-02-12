@@ -84,6 +84,87 @@ pae = metrics.predicted_aligned_error
 max_pae = metrics.max_predicted_aligned_error
 ```
 
+## Pipeline API
+
+In addition to the monolithic `infer()`, ESMFold.jl exports composable pipeline stages
+that give you access to intermediate representations. All functions work on both CPU and
+GPU — tensors follow the model device automatically.
+
+### Pipeline overview
+
+```
+prepare_inputs  →  run_embedding  →  run_trunk  →  run_heads  →  (post‑processing)
+                   ╰─ run_esm2        ╰─ run_trunk_single_pass
+                                      ╰─ run_structure_module
+```
+
+`run_pipeline(model, sequences)` chains all stages and produces output identical to
+`infer()`. The individual stages can be called separately for research workflows.
+
+### Stage reference
+
+| Function | Input | Output | Description |
+|----------|-------|--------|-------------|
+| `prepare_inputs(model, seqs)` | sequences | NamedTuple | Encode + device transfer |
+| `run_esm2(model, inputs)` | prepared inputs | `ESM2Output` | Raw ESM2 with BOS/EOS wrapping |
+| `run_embedding(model, inputs)` | prepared inputs | `(s_s_0, s_z_0)` | ESM2 + projection to trunk dims |
+| `run_trunk(model, s_s_0, s_z_0, inputs)` | embeddings | Dict | Full trunk: recycling + structure module |
+| `run_trunk_single_pass(model, s_s, s_z, inputs)` | states | `(s_s, s_z)` | One pass through 48 blocks (no recycling) |
+| `run_structure_module(model, s_s, s_z, inputs)` | trunk states | Dict | Structure module on custom states |
+| `run_heads(model, structure, inputs)` | structure Dict | Dict | Distogram, PTM, lDDT, LM heads |
+| `run_pipeline(model, seqs)` | sequences | Dict | Full pipeline (identical to `infer`) |
+
+### Examples
+
+**Get ESM2 embeddings:**
+
+```julia
+inputs = prepare_inputs(model, "MKQLLED...")
+esm_out = run_esm2(model, inputs; repr_layers=collect(0:33))
+esm_out.representations[33]  # (B, T, C) last-layer hidden states
+```
+
+**Get trunk output without the structure module:**
+
+```julia
+inputs = prepare_inputs(model, "MKQLLED...")
+emb = run_embedding(model, inputs)
+result = run_trunk_single_pass(model, emb.s_s_0, emb.s_z_0, inputs)
+result.s_s  # (1024, L, B) sequence state
+result.s_z  # (128, L, L, B) pairwise state
+```
+
+**Run structure module on custom features:**
+
+```julia
+structure = run_structure_module(model, custom_s_s, custom_s_z, inputs)
+```
+
+**Get distograms from one pass:**
+
+```julia
+emb = run_embedding(model, inputs)
+result = run_trunk_single_pass(model, emb.s_s_0, emb.s_z_0, inputs)
+structure = run_structure_module(model, result.s_s, result.s_z, inputs)
+output = run_heads(model, structure, inputs)
+output[:distogram_logits]  # (64, L, L, B)
+```
+
+### AD‑compatible ESM2 forward
+
+The standard ESM2 forward uses in‑place GPU ops that Zygote cannot differentiate.
+`esm2_forward_ad` provides an allocating replacement:
+
+```julia
+using Zygote
+
+# tokens_bt: (B, T) 0-indexed token array (from ESM2's Alphabet conventions)
+grads = Zygote.gradient(model.embed.esm) do esm
+    x = esm2_forward_ad(esm, tokens_bt)
+    sum(x)
+end
+```
+
 ## Weights And Caching
 
 `load_ESMFold()` downloads the safetensors checkpoint from Hugging Face using
