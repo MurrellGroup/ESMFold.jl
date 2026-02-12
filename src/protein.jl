@@ -134,7 +134,6 @@ function to_pdb(prot::Protein)
 end
 
 function output_to_pdb(output::AbstractDict)
-    final_atom_positions = atom14_to_atom37(output[:positions][end, :, :, :, :], output)
     cpu_out = Dict{Symbol,Any}()
     for (k, v) in output
         if v isa AbstractArray
@@ -143,7 +142,7 @@ function output_to_pdb(output::AbstractDict)
             cpu_out[k] = v
         end
     end
-    final_atom_positions = Array(final_atom_positions)
+    final_atom_positions = atom14_to_atom37(cpu_out[:positions][end, :, :, :, :], cpu_out)
     final_atom_mask = cpu_out[:atom37_atom_exists]
 
     pdbs = String[]

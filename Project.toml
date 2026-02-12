@@ -1,13 +1,12 @@
 name = "ESMFold"
 uuid = "992ade7d-a23b-44e1-bfa9-f18d3a6e7567"
-authors = ["Ben Murrell"]
 version = "1.0.0-DEV"
+authors = ["Ben Murrell"]
 
 [deps]
 BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
-BatchedTransformations = "8ba27c4b-52b5-4b10-bc66-a4fda05aa11b"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-Einops = "e3ce28c8-8bfb-4704-8add-e3e7f14b55c9"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 HuggingFaceApi = "3cc741c3-0c9d-4fbe-84fa-cdec264173de"
 JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
@@ -17,22 +16,19 @@ NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
 NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
 Onion = "fdebf6c2-71da-43a1-b539-c3bc3e09c5c6"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
-SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
-Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
-Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+cuDNN = "02a925ec-e4fe-4b08-9a7e-0d78e3d38ccd"
 
 [compat]
 BFloat16s = "0.5, 0.6"
+CUDA = "5.9.6"
 ChainRulesCore = "1.26.0"
-Einops = "0.1.14"
 Flux = "0.16.9"
 HuggingFaceApi = "0.1"
 JSON = "1.4.0"
 NNlib = "0.9.33"
 NPZ = "0.4.3"
 Onion = "0.2.18"
-SpecialFunctions = "2"
-Zygote = "0.7.10"
+cuDNN = "1.4.6"
 julia = "1.10"
 
 [extras]

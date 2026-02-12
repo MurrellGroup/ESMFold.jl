@@ -86,11 +86,11 @@ function compute_predicted_aligned_error(
     max_bin::Int = 31,
     no_bins::Int = 64,
 )
-    boundaries = range(0f0, Float32(max_bin); length=no_bins - 1)
-    boundaries = to_device(collect(boundaries), logits, Float32)
+    boundaries_cpu = collect(range(0f0, Float32(max_bin); length=no_bins - 1))
+    bin_centers_cpu = _calculate_bin_centers(boundaries_cpu)
 
     aligned_confidence_probs = NNlib.softmax(logits; dims=1)
-    bin_centers = _calculate_bin_centers(boundaries)
+    bin_centers = to_device(bin_centers_cpu, logits, Float32)
     bview = reshape(bin_centers, length(bin_centers), ntuple(_ -> 1, ndims(aligned_confidence_probs) - 1)...)
     expected = sum(aligned_confidence_probs .* bview; dims=1)
     expected = dropdims(expected; dims=1)
@@ -98,7 +98,7 @@ function compute_predicted_aligned_error(
     return Dict(
         :aligned_confidence_probs => aligned_confidence_probs,
         :predicted_aligned_error => expected,
-        :max_predicted_aligned_error => bin_centers[end],
+        :max_predicted_aligned_error => bin_centers_cpu[end],
     )
 end
 
