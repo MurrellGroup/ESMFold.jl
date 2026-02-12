@@ -71,30 +71,30 @@ function load_esm2_npz!(model::ESM2, path::AbstractString)
     return model
 end
 
-function load_esmfold_safetensors!(model::ESMFoldEmbed, reader::SafeTensors.Reader)
-    SafeTensors.read_into!(reader, "af2_to_esm", model.af2_to_esm)
-    SafeTensors.read_into!(reader, "esm_s_combine", model.esm_s_combine)
+function load_esmfold_safetensors!(model::ESMFoldEmbed, reader::ProtSafeTensors.Reader)
+    ProtSafeTensors.read_into!(reader, "af2_to_esm", model.af2_to_esm)
+    ProtSafeTensors.read_into!(reader, "esm_s_combine", model.esm_s_combine)
 
-    SafeTensors.read_into!(reader, "esm_s_mlp.0.weight", model.esm_s_mlp.norm.w)
-    SafeTensors.read_into!(reader, "esm_s_mlp.0.bias", model.esm_s_mlp.norm.b)
-    SafeTensors.read_into!(reader, "esm_s_mlp.1.weight", model.esm_s_mlp.fc1.weight)
-    SafeTensors.read_into!(reader, "esm_s_mlp.1.bias", model.esm_s_mlp.fc1.bias)
-    SafeTensors.read_into!(reader, "esm_s_mlp.3.weight", model.esm_s_mlp.fc2.weight)
-    SafeTensors.read_into!(reader, "esm_s_mlp.3.bias", model.esm_s_mlp.fc2.bias)
+    ProtSafeTensors.read_into!(reader, "esm_s_mlp.0.weight", model.esm_s_mlp.norm.w)
+    ProtSafeTensors.read_into!(reader, "esm_s_mlp.0.bias", model.esm_s_mlp.norm.b)
+    ProtSafeTensors.read_into!(reader, "esm_s_mlp.1.weight", model.esm_s_mlp.fc1.weight)
+    ProtSafeTensors.read_into!(reader, "esm_s_mlp.1.bias", model.esm_s_mlp.fc1.bias)
+    ProtSafeTensors.read_into!(reader, "esm_s_mlp.3.weight", model.esm_s_mlp.fc2.weight)
+    ProtSafeTensors.read_into!(reader, "esm_s_mlp.3.bias", model.esm_s_mlp.fc2.bias)
 
     if model.esm_z_mlp !== nothing
-        SafeTensors.read_into!(reader, "esm_z_mlp.0.weight", model.esm_z_mlp.norm.w)
-        SafeTensors.read_into!(reader, "esm_z_mlp.0.bias", model.esm_z_mlp.norm.b)
-        SafeTensors.read_into!(reader, "esm_z_mlp.1.weight", model.esm_z_mlp.fc1.weight)
-        SafeTensors.read_into!(reader, "esm_z_mlp.1.bias", model.esm_z_mlp.fc1.bias)
-        SafeTensors.read_into!(reader, "esm_z_mlp.3.weight", model.esm_z_mlp.fc2.weight)
-        SafeTensors.read_into!(reader, "esm_z_mlp.3.bias", model.esm_z_mlp.fc2.bias)
+        ProtSafeTensors.read_into!(reader, "esm_z_mlp.0.weight", model.esm_z_mlp.norm.w)
+        ProtSafeTensors.read_into!(reader, "esm_z_mlp.0.bias", model.esm_z_mlp.norm.b)
+        ProtSafeTensors.read_into!(reader, "esm_z_mlp.1.weight", model.esm_z_mlp.fc1.weight)
+        ProtSafeTensors.read_into!(reader, "esm_z_mlp.1.bias", model.esm_z_mlp.fc1.bias)
+        ProtSafeTensors.read_into!(reader, "esm_z_mlp.3.weight", model.esm_z_mlp.fc2.weight)
+        ProtSafeTensors.read_into!(reader, "esm_z_mlp.3.bias", model.esm_z_mlp.fc2.bias)
     end
 
     # embedding.weight in checkpoint is (n_tokens, c_s); Flux expects (c_s, n_tokens)
     permutedims!(
         model.embedding.weight,
-        SafeTensors.read_tensor(reader, "embedding.weight"),
+        ProtSafeTensors.read_tensor(reader, "embedding.weight"),
         (2, 1),
     )
 
@@ -102,68 +102,68 @@ function load_esmfold_safetensors!(model::ESMFoldEmbed, reader::SafeTensors.Read
     # word_embeddings in checkpoint is (vocab, dim); Flux expects (dim, vocab)
     permutedims!(
         model.esm.embed_tokens.weight,
-        SafeTensors.read_tensor(reader, "esm.embeddings.word_embeddings.weight"),
+        ProtSafeTensors.read_tensor(reader, "esm.embeddings.word_embeddings.weight"),
         (2, 1),
     )
-    SafeTensors.read_into!(reader, "esm.encoder.emb_layer_norm_after.weight", model.esm.emb_layer_norm_after.w)
-    SafeTensors.read_into!(reader, "esm.encoder.emb_layer_norm_after.bias", model.esm.emb_layer_norm_after.b)
+    ProtSafeTensors.read_into!(reader, "esm.encoder.emb_layer_norm_after.weight", model.esm.emb_layer_norm_after.w)
+    ProtSafeTensors.read_into!(reader, "esm.encoder.emb_layer_norm_after.bias", model.esm.emb_layer_norm_after.b)
 
     for i in 0:(model.esm.num_layers - 1)
         layer = model.esm.layers[i + 1]
         prefix = "esm.encoder.layer.$i"
 
-        SafeTensors.read_into!(reader, "$prefix.attention.self.query.weight", layer.self_attn.q_proj.weight)
-        SafeTensors.read_into!(reader, "$prefix.attention.self.query.bias", layer.self_attn.q_proj.bias)
-        SafeTensors.read_into!(reader, "$prefix.attention.self.key.weight", layer.self_attn.k_proj.weight)
-        SafeTensors.read_into!(reader, "$prefix.attention.self.key.bias", layer.self_attn.k_proj.bias)
-        SafeTensors.read_into!(reader, "$prefix.attention.self.value.weight", layer.self_attn.v_proj.weight)
-        SafeTensors.read_into!(reader, "$prefix.attention.self.value.bias", layer.self_attn.v_proj.bias)
-        SafeTensors.read_into!(reader, "$prefix.attention.output.dense.weight", layer.self_attn.out_proj.weight)
-        SafeTensors.read_into!(reader, "$prefix.attention.output.dense.bias", layer.self_attn.out_proj.bias)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.self.query.weight", layer.self_attn.q_proj.weight)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.self.query.bias", layer.self_attn.q_proj.bias)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.self.key.weight", layer.self_attn.k_proj.weight)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.self.key.bias", layer.self_attn.k_proj.bias)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.self.value.weight", layer.self_attn.v_proj.weight)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.self.value.bias", layer.self_attn.v_proj.bias)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.output.dense.weight", layer.self_attn.out_proj.weight)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.output.dense.bias", layer.self_attn.out_proj.bias)
 
-        SafeTensors.read_into!(reader, "$prefix.attention.LayerNorm.weight", layer.self_attn_layer_norm.w)
-        SafeTensors.read_into!(reader, "$prefix.attention.LayerNorm.bias", layer.self_attn_layer_norm.b)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.LayerNorm.weight", layer.self_attn_layer_norm.w)
+        ProtSafeTensors.read_into!(reader, "$prefix.attention.LayerNorm.bias", layer.self_attn_layer_norm.b)
 
-        SafeTensors.read_into!(reader, "$prefix.intermediate.dense.weight", layer.fc1.weight)
-        SafeTensors.read_into!(reader, "$prefix.intermediate.dense.bias", layer.fc1.bias)
-        SafeTensors.read_into!(reader, "$prefix.output.dense.weight", layer.fc2.weight)
-        SafeTensors.read_into!(reader, "$prefix.output.dense.bias", layer.fc2.bias)
+        ProtSafeTensors.read_into!(reader, "$prefix.intermediate.dense.weight", layer.fc1.weight)
+        ProtSafeTensors.read_into!(reader, "$prefix.intermediate.dense.bias", layer.fc1.bias)
+        ProtSafeTensors.read_into!(reader, "$prefix.output.dense.weight", layer.fc2.weight)
+        ProtSafeTensors.read_into!(reader, "$prefix.output.dense.bias", layer.fc2.bias)
 
-        SafeTensors.read_into!(reader, "$prefix.LayerNorm.weight", layer.final_layer_norm.w)
-        SafeTensors.read_into!(reader, "$prefix.LayerNorm.bias", layer.final_layer_norm.b)
+        ProtSafeTensors.read_into!(reader, "$prefix.LayerNorm.weight", layer.final_layer_norm.w)
+        ProtSafeTensors.read_into!(reader, "$prefix.LayerNorm.bias", layer.final_layer_norm.b)
     end
 
     return model
 end
 
 function load_esmfold_safetensors!(model::ESMFoldEmbed, path::AbstractString)
-    reader = SafeTensors.Reader(path)
+    reader = ProtSafeTensors.Reader(path)
     return load_esmfold_safetensors!(model, reader)
 end
 
-function _load_layernorm!(reader::SafeTensors.Reader, prefix::String, ln::LayerNormFirst)
-    SafeTensors.read_into!(reader, "$prefix.weight", ln.w)
-    SafeTensors.read_into!(reader, "$prefix.bias", ln.b)
+function _load_layernorm!(reader::ProtSafeTensors.Reader, prefix::String, ln::LayerNormFirst)
+    ProtSafeTensors.read_into!(reader, "$prefix.weight", ln.w)
+    ProtSafeTensors.read_into!(reader, "$prefix.bias", ln.b)
 end
 
-function _load_linear!(reader::SafeTensors.Reader, prefix::String, lin::LinearFirst)
-    SafeTensors.read_into!(reader, "$prefix.weight", lin.weight)
+function _load_linear!(reader::ProtSafeTensors.Reader, prefix::String, lin::LinearFirst)
+    ProtSafeTensors.read_into!(reader, "$prefix.weight", lin.weight)
     if lin.use_bias
-        SafeTensors.read_into!(reader, "$prefix.bias", lin.bias)
+        ProtSafeTensors.read_into!(reader, "$prefix.bias", lin.bias)
     end
 end
 
-function _load_embedding_weight!(reader::SafeTensors.Reader, name::String, emb)
-    permutedims!(emb.weight, SafeTensors.read_tensor(reader, name), (2, 1))
+function _load_embedding_weight!(reader::ProtSafeTensors.Reader, name::String, emb)
+    permutedims!(emb.weight, ProtSafeTensors.read_tensor(reader, name), (2, 1))
 end
 
-function _load_residue_mlp!(reader::SafeTensors.Reader, prefix::String, mlp::ResidueMLP)
+function _load_residue_mlp!(reader::ProtSafeTensors.Reader, prefix::String, mlp::ResidueMLP)
     _load_layernorm!(reader, "$prefix.mlp.0", mlp.norm)
     _load_linear!(reader, "$prefix.mlp.1", mlp.fc1)
     _load_linear!(reader, "$prefix.mlp.3", mlp.fc2)
 end
 
-function _load_triangle_mul!(reader::SafeTensors.Reader, prefix::String, mul::TriangleMultiplicativeUpdate)
+function _load_triangle_mul!(reader::ProtSafeTensors.Reader, prefix::String, mul::TriangleMultiplicativeUpdate)
     _load_layernorm!(reader, "$prefix.layer_norm_in", mul.layer_norm_in)
     _load_layernorm!(reader, "$prefix.layer_norm_out", mul.layer_norm_out)
     _load_linear!(reader, "$prefix.linear_a_p", mul.linear_a_p)
@@ -174,7 +174,7 @@ function _load_triangle_mul!(reader::SafeTensors.Reader, prefix::String, mul::Tr
     _load_linear!(reader, "$prefix.linear_z", mul.linear_z)
 end
 
-function _load_of_mha!(reader::SafeTensors.Reader, prefix::String, mha::OFMultiheadAttention)
+function _load_of_mha!(reader::ProtSafeTensors.Reader, prefix::String, mha::OFMultiheadAttention)
     _load_linear!(reader, "$prefix.linear_q", mha.linear_q)
     _load_linear!(reader, "$prefix.linear_k", mha.linear_k)
     _load_linear!(reader, "$prefix.linear_v", mha.linear_v)
@@ -182,13 +182,13 @@ function _load_of_mha!(reader::SafeTensors.Reader, prefix::String, mha::OFMultih
     mha.linear_g !== nothing && _load_linear!(reader, "$prefix.linear_g", mha.linear_g)
 end
 
-function _load_triangle_attention!(reader::SafeTensors.Reader, prefix::String, attn::TriangleAttention)
+function _load_triangle_attention!(reader::ProtSafeTensors.Reader, prefix::String, attn::TriangleAttention)
     _load_layernorm!(reader, "$prefix.layer_norm", attn.layer_norm)
     _load_linear!(reader, "$prefix.linear", attn.linear)
     _load_of_mha!(reader, "$prefix.mha", attn.mha)
 end
 
-function _load_structure_module!(reader::SafeTensors.Reader, prefix::String, sm::StructureModule)
+function _load_structure_module!(reader::ProtSafeTensors.Reader, prefix::String, sm::StructureModule)
     _load_layernorm!(reader, "$prefix.layer_norm_s", sm.layer_norm_s)
     _load_layernorm!(reader, "$prefix.layer_norm_z", sm.layer_norm_z)
     _load_linear!(reader, "$prefix.linear_in", sm.linear_in)
@@ -200,7 +200,7 @@ function _load_structure_module!(reader::SafeTensors.Reader, prefix::String, sm:
     _load_linear!(reader, "$prefix.ipa.linear_kv_points", ipa.linear_kv_points.linear)
     _load_linear!(reader, "$prefix.ipa.linear_b", ipa.linear_b)
     _load_linear!(reader, "$prefix.ipa.linear_out", ipa.linear_out)
-    SafeTensors.read_into!(reader, "$prefix.ipa.head_weights", ipa.head_weights)
+    ProtSafeTensors.read_into!(reader, "$prefix.ipa.head_weights", ipa.head_weights)
 
     _load_layernorm!(reader, "$prefix.layer_norm_ipa", sm.layer_norm_ipa)
 
@@ -225,14 +225,14 @@ function _load_structure_module!(reader::SafeTensors.Reader, prefix::String, sm:
     end
 end
 
-function load_esmfold_safetensors!(model::ESMFoldModel, reader::SafeTensors.Reader)
+function load_esmfold_safetensors!(model::ESMFoldModel, reader::ProtSafeTensors.Reader)
     load_esmfold_safetensors!(model.embed, reader)
 
     _load_embedding_weight!(reader, "trunk.pairwise_positional_embedding.embedding.weight", model.trunk.pairwise_positional_embedding.embedding)
 
     _load_layernorm!(reader, "trunk.recycle_s_norm", model.trunk.recycle_s_norm)
     _load_layernorm!(reader, "trunk.recycle_z_norm", model.trunk.recycle_z_norm)
-    permutedims!(model.trunk.recycle_disto.weight, SafeTensors.read_tensor(reader, "trunk.recycle_disto.weight"), (2, 1))
+    permutedims!(model.trunk.recycle_disto.weight, ProtSafeTensors.read_tensor(reader, "trunk.recycle_disto.weight"), (2, 1))
 
     _load_linear!(reader, "trunk.trunk2sm_s", model.trunk.trunk2sm_s)
     _load_linear!(reader, "trunk.trunk2sm_z", model.trunk.trunk2sm_z)
@@ -277,11 +277,11 @@ function load_esmfold_safetensors!(model::ESMFoldModel, reader::SafeTensors.Read
 end
 
 function load_esmfold_safetensors!(model::ESMFoldModel, path::AbstractString)
-    reader = SafeTensors.Reader(path)
+    reader = ProtSafeTensors.Reader(path)
     return load_esmfold_safetensors!(model, reader)
 end
 
-function _infer_esmfold_config(reader::SafeTensors.Reader)
+function _infer_esmfold_config(reader::ProtSafeTensors.Reader)
     header_keys = collect(keys(reader.header))
 
     layer_ids = Int[]
@@ -314,7 +314,7 @@ function _infer_esmfold_config(reader::SafeTensors.Reader)
     return num_layers, embed_dim, attention_heads, c_s, c_z
 end
 
-function _infer_esmfold_full_config(reader::SafeTensors.Reader)
+function _infer_esmfold_full_config(reader::ProtSafeTensors.Reader)
     num_layers, embed_dim, attention_heads, c_s, c_z = _infer_esmfold_config(reader)
 
     block_ids = Int[]
@@ -376,7 +376,7 @@ function load_ESM(;
         local_files_only = local_files_only,
     )
 
-    reader = SafeTensors.Reader(path)
+    reader = ProtSafeTensors.Reader(path)
     num_layers, embed_dim, attention_heads, c_s, c_z = _infer_esmfold_config(reader)
 
     use_esm_attn_map && !haskey(reader.header, "esm_z_mlp.1.weight") &&
@@ -416,7 +416,7 @@ function load_ESMFold(;
         local_files_only = local_files_only,
     )
 
-    reader = SafeTensors.Reader(path)
+    reader = ProtSafeTensors.Reader(path)
     (
         num_layers,
         embed_dim,

@@ -10,7 +10,7 @@ using JSON
 using HuggingFaceApi
 
 include("device_utils.jl")
-include("safetensors.jl")
+using ProtInterop.ProtSafeTensors
 include("constants.jl")
 
 # GPU support
