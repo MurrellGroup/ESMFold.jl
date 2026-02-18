@@ -11,6 +11,7 @@ using HuggingFaceApi
 
 include("device_utils.jl")
 using ProtInterop.ProtSafeTensors
+using ProtInterop: compute_plddt, compute_predicted_aligned_error, compute_tm
 include("constants.jl")
 
 # GPU support
