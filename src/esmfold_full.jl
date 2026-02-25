@@ -188,7 +188,7 @@ function (m::ESMFoldModel)(
     structure[:ptm] = to_device(reshape(collect(ptm_vals), size(ptm_logits, 4)), ptm_logits, eltype(ptm_logits))
 
     structure_update = compute_predicted_aligned_error(ptm_logits; max_bin=31, no_bins=m.distogram_bins)
-    for (k, v) in structure_update
+    for (k, v) in pairs(structure_update)
         structure[k] = v
     end
 

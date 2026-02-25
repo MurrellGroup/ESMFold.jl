@@ -342,7 +342,7 @@ function run_heads(model::ESMFoldModel, structure::AbstractDict, inputs::NamedTu
 
     # Predicted aligned error
     structure_update = compute_predicted_aligned_error(ptm_logits; max_bin=31, no_bins=model.distogram_bins)
-    for (k, v) in structure_update
+    for (k, v) in pairs(structure_update)
         output[k] = v
     end
 
