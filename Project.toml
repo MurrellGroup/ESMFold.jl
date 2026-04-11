@@ -15,8 +15,8 @@ Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
 NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
 Onion = "fdebf6c2-71da-43a1-b539-c3bc3e09c5c6"
-ProtInterop = "b3e4c6a1-2f5a-4d8c-9e7b-1a3c5d9f0e2b"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+ProtInterop = "b3e4c6a1-2f5a-4d8c-9e7b-1a3c5d9f0e2b"
 cuDNN = "02a925ec-e4fe-4b08-9a7e-0d78e3d38ccd"
 
 [compat]
@@ -29,7 +29,7 @@ JSON = "1.4.0"
 NNlib = "0.9.33"
 NPZ = "0.4.3"
 Onion = "0.2.18"
-cuDNN = "1.4.6"
+cuDNN = "1.4.6, 6"
 julia = "1.10"
 
 [extras]
